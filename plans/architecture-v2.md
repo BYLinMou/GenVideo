@@ -488,7 +488,3 @@ graph TB
 - 視頻處理：MoviePy
 - 圖片生成：POE API
 - 文本分析：LLM API (OpenAI Compatible)
-
-## 下一步
-
-請確認這些改進是否符合您的預期，我將更新待辦事項清單。
