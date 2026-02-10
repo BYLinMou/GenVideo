@@ -190,7 +190,7 @@ graph LR
 
 ```json
 {
-  "poe_api": {
+  "IMAGE_API": {
     "endpoint": "https://api.poe.com/v1/chat/completions",
     "api_key": "your-poe-api-key",
     "image_model": "nano-banana"
@@ -198,7 +198,7 @@ graph LR
   "llm_api": {
     "endpoint": "https://api.openai.com/v1",
     "api_key": "your-openai-api-key",
-    "model": "gpt-3.5-turbo"
+    "model": "your-selected-model"
   },
   "video_defaults": {
     "resolution": "1080x1920",

@@ -14,6 +14,11 @@
 - **新設計**：LLM自動分析小說提取角色信息，用戶確認後生成
 - **優勢**：大幅減少用戶工作量、提升配置準確性
 
+### 🎯 改進3：動態模型選擇
+- **原設計**：模型列表硬編碼在前端
+- **新設計**：前端動態 fetch 可用模型列表，用戶可選擇對應模型
+- **優勢**：支持多個 LLM 提供商、靈活切換、無需重新部署
+
 ## 系統架構圖
 
 ```mermaid
@@ -159,7 +164,41 @@ final_video = concatenate_videoclips(clips)
 
 ## 更新後的API設計
 
-### 1. 智能角色分析API（新增）
+### 1. 獲取可用模型列表API（新增）
+
+**GET /api/models**
+
+響應：
+```json
+{
+  "models": [
+    {
+      "id": "model-id-1",
+      "name": "Model Name 1",
+      "provider": "provider-name",
+      "description": "模型描述",
+      "capabilities": ["text-analysis", "character-extraction"],
+      "available": true
+    },
+    {
+      "id": "model-id-2",
+      "name": "Model Name 2",
+      "provider": "provider-name",
+      "description": "模型描述",
+      "capabilities": ["text-analysis", "character-extraction"],
+      "available": false
+    }
+  ]
+}
+```
+
+**實現說明：**
+- 後端根據 `.env` 配置的 API 密鑰動態檢測可用模型
+- 前端調用此 API 獲取模型列表，展示給用戶選擇
+- 支持多個 LLM 提供商（OpenAI、Anthropic 等）
+- 標記模型的可用性（是否有有效的 API 密鑰）
+
+### 2. 智能角色分析API（新增）
 
 **POST /api/analyze-characters**
 
@@ -167,7 +206,8 @@ final_video = concatenate_videoclips(clips)
 ```json
 {
   "text": "小說全文或前幾章內容",
-  "analysis_depth": "basic|detailed"
+  "analysis_depth": "basic|detailed",
+  "model_id": "user-selected-model-id"
 }
 ```
 
@@ -186,11 +226,17 @@ final_video = concatenate_videoclips(clips)
       "base_prompt": "基礎提示詞"
     }
   ],
-  "confidence": 0.85
+  "confidence": 0.85,
+  "model_used": "user-selected-model-id"
 }
 ```
 
-### 2. 確認角色配置API（新增）
+**實現說明：**
+- 新增 `model_id` 參數，允許用戶選擇使用哪個模型
+- 後端根據 `model_id` 調用對應的 LLM API
+- 響應中包含 `model_used` 字段，告知前端實際使用的模型
+
+### 3. 確認角色配置API（新增）
 
 **POST /api/confirm-characters**
 
@@ -208,7 +254,7 @@ final_video = concatenate_videoclips(clips)
 }
 ```
 
-### 3. 生成視頻API（更新）
+### 4. 生成視頻API（更新）
 
 **POST /api/generate-video**
 
@@ -220,11 +266,12 @@ final_video = concatenate_videoclips(clips)
   "segment_method": "sentence|fixed|smart",
   "resolution": "1080x1920",
   "subtitle_style": "basic|highlight|danmaku|center",
-  "fps": 30
+  "fps": 30,
+  "model_id": "user-selected-model-id"
 }
 ```
 
-**注意：移除了 `scene_duration` 參數**
+**注意：移除了 `scene_duration` 參數，新增 `model_id` 參數**
 
 ## 更新後的前端流程
 
@@ -232,32 +279,55 @@ final_video = concatenate_videoclips(clips)
 
 ```mermaid
 graph TD
-    A[上傳小說] --> B[等待AI分析]
-    B --> C[查看角色配置建議]
-    C --> D{滿意?}
-    D -->|是| E[確認配置]
-    D -->|否| F[修改配置]
-    F --> E
-    E --> G[設置視頻參數]
-    G --> H[開始生成]
-    H --> I[監控進度]
-    I --> J[預覽視頻]
-    J --> K[下載]
+    A[進入應用] --> B[Fetch 模型列表]
+    B --> C[用戶選擇模型]
+    C --> D[上傳小說]
+    D --> E[等待AI分析]
+    E --> F[查看角色配置建議]
+    F --> G{滿意?}
+    G -->|是| H[確認配置]
+    G -->|否| I[修改配置]
+    I --> H
+    H --> J[設置視頻參數]
+    J --> K[開始生成]
+    K --> L[監控進度]
+    L --> M[預覽視頻]
+    M --> N[下載]
 ```
 
 ### 前端界面改進
 
-#### 1. 角色分析界面（新增）
+#### 1. 模型選擇界面（新增）
+
+```
+┌─────────────────────────────────────┐
+│  選擇 AI 模型                        │
+│                                     │
+│  ○ Model 1                          │
+│    模型描述                          │
+│                                     │
+│  ● Model 2 (推薦)                   │
+│    模型描述                          │
+│                                     │
+│  ○ Model 3 (不可用)                 │
+│    模型描述                          │
+│                                     │
+│  [確認選擇]                          │
+└─────────────────────────────────────┘
+```
+
+#### 2. 角色分析界面（新增）
 
 ```
 ┌─────────────────────────────────────┐
 │  AI正在分析您的小說...              │
 │  ▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░ 50%          │
 │  已識別3個主要角色                   │
+│  使用模型: [模型名稱]                │
 └─────────────────────────────────────┘
 ```
 
-#### 2. 角色確認界面（新增）
+#### 3. 角色確認界面（新增）
 
 ```
 ┌─────────────────────────────────────┐
@@ -277,7 +347,7 @@ graph TD
 └─────────────────────────────────────┘
 ```
 
-#### 3. 視頻配置界面（簡化）
+#### 4. 視頻配置界面（簡化）
 
 ```
 ┌─────────────────────────────────────┐
@@ -302,11 +372,65 @@ graph TD
 
 ## 技術實現細節
 
-### 1. LLM角色分析實現
+### 1. 模型列表動態獲取
 
 ```python
-async def analyze_characters(text: str, depth: str = "detailed"):
-    """使用LLM分析小說角色"""
+async def get_available_models():
+    """動態獲取可用的 LLM 模型列表"""
+    
+    models = []
+    
+    # 檢查 OpenAI 模型
+    if os.getenv("LLM_API_KEY"):
+        openai_models = [
+            {
+                "id": "model-id-1",
+                "name": "Model Name 1",
+                "provider": "openai",
+                "description": "模型描述",
+                "capabilities": ["text-analysis", "character-extraction"],
+                "available": True
+            },
+            {
+                "id": "model-id-2",
+                "name": "Model Name 2",
+                "provider": "openai",
+                "description": "模型描述",
+                "capabilities": ["text-analysis", "character-extraction"],
+                "available": True
+            }
+        ]
+        models.extend(openai_models)
+    
+    # 檢查其他提供商的模型
+    # ...
+    
+    return {
+        "models": models
+    }
+```
+
+### 2. LLM角色分析實現（支持模型選擇）
+
+```python
+async def analyze_characters(
+    text: str, 
+    depth: str = "detailed",
+    model_id: str = None
+):
+    """使用指定的 LLM 模型分析小說角色"""
+    
+    # 如果未指定模型，使用環境變數配置的模型
+    if not model_id:
+        model_id = os.getenv("DEFAULT_LLM_MODEL")
+    
+    # 根據 model_id 選擇對應的 API 調用
+    if model_id.startswith("gpt"):
+        llm_api = OpenAIAPI(model=model_id)
+    elif model_id.startswith("claude"):
+        llm_api = AnthropicAPI(model=model_id)
+    else:
+        raise ValueError(f"Unknown model: {model_id}")
     
     prompt = f"""
     分析以下小說文本，提取主要角色信息：
@@ -346,10 +470,58 @@ async def analyze_characters(text: str, depth: str = "detailed"):
             char['appearance']
         )
     
-    return characters
+    return {
+        "characters": characters,
+        "model_used": model_id
+    }
 ```
 
-### 2. 音色推薦邏輯
+### 3. 前端模型選擇邏輯
+
+```javascript
+// 1. 應用初始化時獲取模型列表
+async function initializeApp() {
+  try {
+    const response = await fetch('/api/models');
+    const data = await response.json();
+    
+    // 存儲模型列表
+    store.commit('setAvailableModels', data.models);
+    
+    // 顯示模型選擇界面
+    showModelSelectionUI(data.models);
+  } catch (error) {
+    console.error('Failed to fetch models:', error);
+  }
+}
+
+// 2. 用戶選擇模型後
+function selectModel(modelId) {
+  store.commit('setSelectedModel', modelId);
+  // 進入下一步
+}
+
+// 3. 分析角色時傳遞選定的模型
+async function analyzeCharacters(text) {
+  const selectedModel = store.state.selectedModel;
+  
+  const response = await fetch('/api/analyze-characters', {
+    method: 'POST',
+    body: JSON.stringify({
+      text: text,
+      analysis_depth: 'detailed',
+      model_id: selectedModel
+    })
+  });
+  
+  const data = await response.json();
+  console.log(`使用模型 ${data.model_used} 完成分析`);
+  
+  return data.characters;
+}
+```
+
+### 4. 音色推薦邏輯
 
 ```python
 def recommend_voice(gender: str, age: str, personality: str):
@@ -368,7 +540,7 @@ def recommend_voice(gender: str, age: str, personality: str):
     return voice_map.get(key, 'zh-CN-YunxiNeural')  # 默認音色
 ```
 
-### 3. 時長自動計算
+### 5. 時長自動計算
 
 ```python
 async def generate_video_segment(segment: TextSegment, character_config: dict):
@@ -406,7 +578,7 @@ async def generate_video_segment(segment: TextSegment, character_config: dict):
     return video_clip
 ```
 
-### 4. 字幕時間軸同步
+### 6. 字幕時間軸同步
 
 ```python
 def calculate_subtitle_timing(text: str, audio_duration: float):
@@ -436,19 +608,20 @@ def calculate_subtitle_timing(text: str, audio_duration: float):
 
 ```mermaid
 graph TB
-    A[小說文本] --> B[LLM角色分析]
-    B --> C[角色配置JSON]
-    C --> D[用戶確認]
-    D --> E[文本分段]
-    E --> F[生成圖片]
-    E --> G[生成語音]
-    G --> H[獲取音頻時長]
-    H --> I[計算場景時長]
-    F --> J[視頻合成]
-    G --> J
-    I --> J
-    J --> K[添加字幕]
-    K --> L[最終視頻]
+    A[用戶選擇模型] --> B[小說文本]
+    B --> C[LLM角色分析]
+    C --> D[角色配置JSON]
+    D --> E[用戶確認]
+    E --> F[文本分段]
+    F --> G[生成圖片]
+    F --> H[生成語音]
+    H --> I[獲取音頻時長]
+    I --> J[計算場景時長]
+    G --> K[視頻合成]
+    H --> K
+    J --> K
+    K --> L[添加字幕]
+    L --> M[最終視頻]
 ```
 
 ## 優勢總結
@@ -465,20 +638,29 @@ graph TB
 ✅ 靈活：用戶可以修改
 ✅ 智能：推薦合適的音色和風格
 
+### 改進3：動態模型選擇
+✅ 靈活：支持多個 LLM 提供商
+✅ 可擴展：無需重新部署即可添加新模型
+✅ 用戶友好：前端動態展示可用模型
+✅ 成本優化：用戶可選擇不同成本的模型
+
 ## 更新後的待辦事項
 
 需要新增的任務：
-1. 實現LLM角色分析功能
-2. 開發角色配置推薦算法
-3. 創建角色確認界面
-4. 修改視頻生成邏輯（移除手動時長設定）
-5. 實現音頻時長自動計算
-6. 更新字幕同步算法
+1. 實現模型列表動態獲取 API
+2. 更新角色分析 API 支持模型選擇
+3. 創建模型選擇界面
+4. 實現 LLM 角色分析功能
+5. 開發角色配置推薦算法
+6. 創建角色確認界面
+7. 修改視頻生成邏輯（移除手動時長設定）
+8. 實現音頻時長自動計算
+9. 更新字幕同步算法
 
 需要修改的任務：
 - 視頻配置界面（移除場景時長設定）
 - API端點設計（更新參數）
-- 前端工作流程（增加角色確認步驟）
+- 前端工作流程（增加模型選擇和角色確認步驟）
 
 ## 技術棧（保持不變）
 
