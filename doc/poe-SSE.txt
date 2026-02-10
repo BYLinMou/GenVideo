@@ -1,0 +1,134 @@
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "role": "assistant"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": "Here's an"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": " image of a pink-haired"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": " girl for"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": " you! "
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": "![image](https://pfst.cf2.poecdn.net/base/image/f34be499cc24daa739ae0939c19ba6b1421b02e80f12a907e2b356ceee290400?w=1024&h=1024)"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {
+        "content": "https://pfst.cf2.poecdn.net/base/image/f34be499cc24daa739ae0939c19ba6b1421b02e80f12a907e2b356ceee290400?w=1024&h=1024"
+      },
+      "finish_reason": null
+    }
+  ]
+}
+
+{
+  "id": "chatcmpl-8b99403366e6b0ac57bd0bf2",
+  "object": "chat.completion.chunk",
+  "created": 1770752590,
+  "model": "nano-banana",
+  "choices": [
+    {
+      "index": 0,
+      "delta": {},
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "completion_tokens": 1305,
+    "prompt_tokens": 6,
+    "total_tokens": 1311,
+    "completion_tokens_details": null,
+    "prompt_tokens_details": null
+  }
+}
+
+[DONE]
