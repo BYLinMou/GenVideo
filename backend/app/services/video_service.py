@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import random
 from pathlib import Path
 from collections import deque
 from threading import Thread
@@ -18,7 +19,7 @@ from ..config import project_path, settings
 from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
 from ..state import job_store
 from ..voice_catalog import VOICE_INFOS, recommend_voice
-from .image_service import use_reference_or_generate
+from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
     group_sentences,
@@ -30,6 +31,8 @@ from .scene_cache_service import (
     build_scene_descriptor,
     ensure_scene_cache_paths,
     find_reusable_scene_image,
+    force_llm_select_scene_image,
+    list_scene_cache_entries,
     render_cached_image_to_output,
     save_scene_image_cache_entry,
 )
@@ -896,13 +899,79 @@ async def _resolve_segment_image(
             )
             return reused, "cache", str(matched.get("entry_id") or "") or None
 
-    generated = await use_reference_or_generate(
-        prompt=prompt,
-        output_path=image_path,
-        resolution=resolution,
-        reference_image_path=character.reference_image_path,
-        aspect_ratio=payload.image_aspect_ratio,
-    )
+    try:
+        generated = await use_reference_or_generate(
+            prompt=prompt,
+            output_path=image_path,
+            resolution=resolution,
+            reference_image_path=character.reference_image_path,
+            aspect_ratio=payload.image_aspect_ratio,
+        )
+    except ImageGenerationError as generation_error:
+        logger.warning("Image generation failed for current scene, trying fallback selection")
+
+        forced_llm_pick = await force_llm_select_scene_image(
+            scene_descriptor=descriptor,
+            model_id=payload.model_id,
+            disallow_entry_ids=recent_reuse_entry_ids,
+        )
+        if forced_llm_pick and forced_llm_pick.get("image_path"):
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                forced_llm_pick["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.info(
+                "Scene fallback forced-LLM pick (%s): reason=%s",
+                forced_llm_pick.get("match_type"),
+                forced_llm_pick.get("reason") or "",
+            )
+            return reused, "fallback-llm", str(forced_llm_pick.get("entry_id") or "") or None
+
+        fallback_matched = await find_reusable_scene_image(
+            scene_descriptor=descriptor,
+            model_id=payload.model_id,
+            disallow_entry_ids=recent_reuse_entry_ids,
+        )
+        if fallback_matched and fallback_matched.get("image_path"):
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                fallback_matched["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.info(
+                "Scene fallback cache hit (%s): reason=%s",
+                fallback_matched.get("match_type"),
+                fallback_matched.get("reason") or "",
+            )
+            return reused, "fallback-cache", str(fallback_matched.get("entry_id") or "") or None
+
+        ref_path = Path(character.reference_image_path or "") if character.reference_image_path else None
+        if ref_path and ref_path.exists() and ref_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                ref_path,
+                image_path,
+                resolution,
+            )
+            logger.warning("Scene fallback used character reference image")
+            return reused, "fallback-reference", None
+
+        candidates = await run_in_threadpool(list_scene_cache_entries, recent_reuse_entry_ids)
+        if candidates:
+            selected = random.choice(candidates)
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                selected["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.warning("Scene fallback used random cached image: entry_id=%s", selected.get("id"))
+            return reused, "fallback-random-cache", str(selected.get("id") or "") or None
+
+        raise ImageGenerationError("image generation failed and no fallback scene/reference image available") from generation_error
 
     cache_entry_id: str | None = None
     if payload.enable_scene_image_reuse:

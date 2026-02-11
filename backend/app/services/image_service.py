@@ -8,7 +8,7 @@ from io import BytesIO
 from pathlib import Path
 
 import httpx
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 
 from ..config import settings
 
@@ -16,27 +16,15 @@ from ..config import settings
 logger = logging.getLogger(__name__)
 
 
+class ImageGenerationError(RuntimeError):
+    pass
+
+
 def _extract_first_url(text: str) -> str | None:
     match = re.search(r"https?://[^\s\]\)]+", text)
     if match:
         return match.group(0)
     return None
-
-
-async def _placeholder_image(prompt: str, output_path: Path, size: tuple[int, int]) -> Path:
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    img = Image.new("RGB", size=size, color=(24, 28, 40))
-    draw = ImageDraw.Draw(img)
-    try:
-        font = ImageFont.truetype("arial.ttf", 32)
-    except Exception:
-        font = ImageFont.load_default()
-    draw.text((50, 50), "Generated Placeholder", fill=(230, 230, 240), font=font)
-    wrapped = prompt[:180]
-    draw.text((50, 130), wrapped, fill=(170, 180, 200), font=font)
-    img.save(output_path)
-    logger.warning("Using placeholder image for prompt: %s", prompt[:120])
-    return output_path
 
 
 def _build_messages(prompt: str, reference_image_path: str | None = None) -> list[dict]:
@@ -65,7 +53,7 @@ async def generate_image(
     aspect_ratio: str | None = None,
 ) -> Path:
     if not settings.image_api_key:
-        return await _placeholder_image(prompt, output_path, resolution)
+        raise ImageGenerationError("image_api_key is not configured")
 
     headers = {
         "Authorization": f"Bearer {settings.image_api_key}",
@@ -116,7 +104,7 @@ async def generate_image(
 
             if not image_url:
                 detail = "no content" if not seen_content else "content without image url"
-                raise RuntimeError(f"image stream finished but {detail}")
+                raise ImageGenerationError(f"image stream finished but {detail}")
 
             image_response = await client.get(image_url)
             image_response.raise_for_status()
@@ -130,7 +118,7 @@ async def generate_image(
     except Exception as first_error:
         logger.warning("Primary image generation failed: %s", first_error)
         # Some proxy/image backends may return HTTP 200 but no image URL for pure CJK prompts.
-        # Retry with an English wrapper before falling back to placeholder.
+        # Retry with an English wrapper before failing hard.
         retry_prompt = (
             "Create one single image only. Do not explain. "
             f"Anime-style illustration based on this description: {prompt}"
@@ -146,7 +134,7 @@ async def generate_image(
             return await asyncio.wait_for(_remote_generate(retry_payload), timeout=45)
         except Exception as retry_error:
             logger.exception("Retry image generation failed: %s", retry_error)
-        return await _placeholder_image(prompt, output_path, resolution)
+            raise ImageGenerationError(f"image generation failed after retry: {retry_error}") from retry_error
 
 
 async def use_reference_or_generate(
@@ -156,21 +144,11 @@ async def use_reference_or_generate(
     reference_image_path: str | None,
     aspect_ratio: str | None = None,
 ) -> Path:
-    try:
-        return await generate_image(
-            prompt=prompt,
-            output_path=output_path,
-            resolution=resolution,
-            reference_image_path=reference_image_path,
-            aspect_ratio=aspect_ratio,
-        )
-    except Exception:
-        if reference_image_path:
-            ref = Path(reference_image_path)
-            if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
-                output_path.parent.mkdir(parents=True, exist_ok=True)
-                img = Image.open(ref).convert("RGB")
-                img.save(output_path)
-                return output_path
-        return await _placeholder_image(prompt, output_path, resolution)
+    return await generate_image(
+        prompt=prompt,
+        output_path=output_path,
+        resolution=resolution,
+        reference_image_path=reference_image_path,
+        aspect_ratio=aspect_ratio,
+    )
 

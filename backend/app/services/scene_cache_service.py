@@ -5,6 +5,7 @@ import hashlib
 import logging
 import re
 import shutil
+import sqlite3
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +23,154 @@ logger = logging.getLogger(__name__)
 _CACHE_LOCK = threading.Lock()
 
 
+def _db_path() -> Path:
+    return project_path(settings.scene_cache_db_path)
+
+
+def _connect_db() -> sqlite3.Connection:
+    path = _db_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
+    conn.execute("PRAGMA synchronous=NORMAL;")
+    return conn
+
+
+def _ensure_db_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS scene_entries (
+            id TEXT PRIMARY KEY,
+            created_at TEXT NOT NULL,
+            image_path TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            descriptor_json TEXT NOT NULL,
+            match_profile_json TEXT NOT NULL,
+            reference_image_path TEXT NOT NULL,
+            character_name TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_entries_created_at ON scene_entries(created_at DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_entries_ref_path ON scene_entries(reference_image_path)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_entries_char_name ON scene_entries(character_name)")
+    conn.commit()
+
+
+def _entry_to_db_tuple(entry: dict) -> tuple[str, str, str, str, str, str, str, str]:
+    descriptor = entry.get("descriptor") or {}
+    profile = entry.get("match_profile") or {}
+    ref_path = _normalize_text(str((descriptor.get("reference_image_path") or profile.get("reference_image_path") or "")))
+    char_name = _normalize_text(str((descriptor.get("character_name") or profile.get("character_name") or "")))
+    return (
+        str(entry.get("id") or uuid4().hex),
+        str(entry.get("created_at") or datetime.now(timezone.utc).isoformat()),
+        _normalize_text(str(entry.get("image_path") or "")),
+        _normalize_text(str(entry.get("prompt") or ""))[:220],
+        json.dumps(descriptor, ensure_ascii=False),
+        json.dumps(profile, ensure_ascii=False),
+        ref_path,
+        char_name,
+    )
+
+
+def _db_row_to_entry(row: sqlite3.Row) -> dict:
+    descriptor = {}
+    match_profile = {}
+    try:
+        descriptor = json.loads(row["descriptor_json"] or "{}")
+    except Exception:
+        descriptor = {}
+    try:
+        match_profile = json.loads(row["match_profile_json"] or "{}")
+    except Exception:
+        match_profile = {}
+    return {
+        "id": str(row["id"]),
+        "created_at": str(row["created_at"]),
+        "image_path": str(row["image_path"]),
+        "prompt": str(row["prompt"]),
+        "descriptor": descriptor,
+        "match_profile": match_profile,
+    }
+
+
+def _load_entries_from_db(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT id, created_at, image_path, prompt, descriptor_json, match_profile_json
+        FROM scene_entries
+        ORDER BY created_at ASC
+        """
+    ).fetchall()
+    return [_db_row_to_entry(row) for row in rows]
+
+
+def _insert_entry_to_db(conn: sqlite3.Connection, entry: dict) -> None:
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO scene_entries(
+            id, created_at, image_path, prompt, descriptor_json, match_profile_json, reference_image_path, character_name
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        _entry_to_db_tuple(entry),
+    )
+
+
+def _prune_db_entries(conn: sqlite3.Connection, keep: int = 3000) -> None:
+    conn.execute(
+        """
+        DELETE FROM scene_entries
+        WHERE id IN (
+            SELECT id FROM scene_entries
+            ORDER BY created_at DESC
+            LIMIT -1 OFFSET ?
+        )
+        """,
+        (int(max(1, keep)),),
+    )
+
+
+def _migrate_index_to_db_if_needed(conn: sqlite3.Connection) -> None:
+    count_row = conn.execute("SELECT COUNT(1) AS cnt FROM scene_entries").fetchone()
+    existing = int((count_row["cnt"] if count_row and "cnt" in count_row.keys() else 0) or 0)
+    if existing > 0:
+        return
+
+    index_path = _index_path()
+    if not index_path.exists():
+        return
+
+    try:
+        payload = json.loads(index_path.read_text(encoding="utf-8"))
+    except Exception:
+        logger.exception("Failed to read scene cache index during db migration")
+        return
+
+    entries = payload.get("entries") if isinstance(payload, dict) else []
+    if not isinstance(entries, list):
+        return
+
+    migrated = 0
+    for raw in entries:
+        if not isinstance(raw, dict):
+            continue
+        row = _migrate_entry_schema(raw)
+        if not row:
+            continue
+        image_path = Path(str(row.get("image_path") or ""))
+        if not image_path.exists():
+            continue
+        _insert_entry_to_db(conn, row)
+        migrated += 1
+
+    if migrated:
+        _prune_db_entries(conn, keep=3000)
+        conn.commit()
+        logger.info("Migrated %s scene-cache entries from index.json to sqlite", migrated)
+
+
 def _index_path() -> Path:
     return project_path(settings.scene_cache_index_path)
 
@@ -33,10 +182,20 @@ def _cache_image_root() -> Path:
 def ensure_scene_cache_paths() -> None:
     image_root = _cache_image_root()
     index_path = _index_path()
+    db_path = _db_path()
     image_root.mkdir(parents=True, exist_ok=True)
     index_path.parent.mkdir(parents=True, exist_ok=True)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
     if not index_path.exists():
         index_path.write_text(json.dumps({"schema_version": 2, "entries": []}, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    with _CACHE_LOCK:
+        conn = _connect_db()
+        try:
+            _ensure_db_schema(conn)
+            _migrate_index_to_db_if_needed(conn)
+        finally:
+            conn.close()
 
 
 def _load_index_unlocked() -> dict:
@@ -549,8 +708,24 @@ async def find_reusable_scene_image(
     blocked_ids = {str(item) for item in (disallow_entry_ids or set()) if str(item)}
 
     with _CACHE_LOCK:
-        payload = _load_index_unlocked()
-        entries = [item for item in payload.get("entries", []) if isinstance(item, dict)]
+        conn = _connect_db()
+        try:
+            _ensure_db_schema(conn)
+            _migrate_index_to_db_if_needed(conn)
+            entries = _load_entries_from_db(conn)
+        finally:
+            conn.close()
+
+    target_ref_path = _normalize_text(target_profile.get("reference_image_path", ""))
+    if target_ref_path:
+        same_ref: list[dict] = []
+        for entry in entries:
+            profile = _entry_match_profile(entry)
+            ref = _normalize_text(profile.get("reference_image_path", ""))
+            if ref and ref == target_ref_path:
+                same_ref.append(entry)
+        if same_ref:
+            entries = same_ref
 
     target_profile = _build_match_profile(target_descriptor)
     viable: list[dict] = []
@@ -682,6 +857,91 @@ async def find_reusable_scene_image(
     return None
 
 
+async def force_llm_select_scene_image(
+    scene_descriptor: dict,
+    model_id: str | None = None,
+    disallow_entry_ids: set[str] | None = None,
+) -> dict | None:
+    ensure_scene_cache_paths()
+
+    target_descriptor = _normalize_scene_descriptor(scene_descriptor)
+    target_profile = _build_match_profile(target_descriptor)
+    blocked_ids = {str(item) for item in (disallow_entry_ids or set()) if str(item)}
+
+    with _CACHE_LOCK:
+        conn = _connect_db()
+        try:
+            _ensure_db_schema(conn)
+            _migrate_index_to_db_if_needed(conn)
+            entries = _load_entries_from_db(conn)
+        finally:
+            conn.close()
+
+    target_ref_path = _normalize_text(target_profile.get("reference_image_path", ""))
+    if target_ref_path:
+        same_ref: list[dict] = []
+        for entry in entries:
+            profile = _entry_match_profile(entry)
+            ref = _normalize_text(profile.get("reference_image_path", ""))
+            if ref and ref == target_ref_path:
+                same_ref.append(entry)
+        if same_ref:
+            entries = same_ref
+
+    candidates: list[dict] = []
+    target_action_tokens = set(target_profile.get("action_tokens") or [])
+    target_location_tokens = set(target_profile.get("location_tokens") or [])
+    target_scene_tokens = set(target_profile.get("scene_tokens") or [])
+
+    for entry in entries:
+        entry_id = str(entry.get("id") or "")
+        if entry_id and entry_id in blocked_ids:
+            continue
+
+        migrated = _migrate_entry_schema(entry)
+        if not migrated:
+            continue
+
+        image_path = Path(migrated.get("image_path") or "")
+        if not image_path.exists():
+            continue
+
+        candidate_profile = _entry_match_profile(migrated)
+        action_common = _common_token_count(target_action_tokens, set(candidate_profile.get("action_tokens") or []))
+        location_common = _common_token_count(target_location_tokens, set(candidate_profile.get("location_tokens") or []))
+        scene_common = _common_token_count(target_scene_tokens, set(candidate_profile.get("scene_tokens") or []))
+        character_bonus = 1000 if _character_match(target_profile, candidate_profile) else 0
+        llm_rank = character_bonus + action_common * 100 + location_common * 20 + scene_common
+
+        candidates.append(
+            {
+                **migrated,
+                "match_profile": candidate_profile,
+                "llm_rank": llm_rank,
+            }
+        )
+
+    if not candidates:
+        return None
+
+    top = sorted(candidates, key=lambda item: int(item.get("llm_rank", 0)), reverse=True)[:20]
+    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id)
+    if not selected_id:
+        return None
+
+    selected = next((item for item in top if str(item.get("id")) == selected_id), None)
+    if not selected:
+        return None
+
+    return {
+        "image_path": str(selected["image_path"]),
+        "match_type": "llm-fallback",
+        "confidence": 0.75,
+        "reason": reason,
+        "entry_id": selected.get("id"),
+    }
+
+
 def save_scene_image_cache_entry(
     scene_descriptor: dict,
     source_image_path: str | Path,
@@ -712,12 +972,26 @@ def save_scene_image_cache_entry(
     }
 
     with _CACHE_LOCK:
-        payload = _load_index_unlocked()
-        entries = [item for item in payload.get("entries", []) if isinstance(item, dict)]
-        entries.append(entry)
-        payload["schema_version"] = 2
-        payload["entries"] = entries[-3000:]
-        _save_index_unlocked(payload)
+        conn = _connect_db()
+        try:
+            _ensure_db_schema(conn)
+            _insert_entry_to_db(conn, entry)
+            _prune_db_entries(conn, keep=3000)
+            conn.commit()
+        finally:
+            conn.close()
+
+    # keep json index in sync for backward compatibility / manual inspection
+    try:
+        with _CACHE_LOCK:
+            payload = _load_index_unlocked()
+            entries = [item for item in payload.get("entries", []) if isinstance(item, dict)]
+            entries.append(entry)
+            payload["schema_version"] = 2
+            payload["entries"] = entries[-3000:]
+            _save_index_unlocked(payload)
+    except Exception:
+        logger.exception("Failed to mirror scene cache entry into index.json")
     return entry
 
 
@@ -733,3 +1007,37 @@ def render_cached_image_to_output(
     image = Image.open(src).convert("RGB")
     image.save(dst)
     return dst
+
+
+def list_scene_cache_entries(
+    disallow_entry_ids: set[str] | None = None,
+) -> list[dict]:
+    ensure_scene_cache_paths()
+    blocked_ids = {str(item) for item in (disallow_entry_ids or set()) if str(item)}
+
+    with _CACHE_LOCK:
+        conn = _connect_db()
+        try:
+            _ensure_db_schema(conn)
+            _migrate_index_to_db_if_needed(conn)
+            entries = _load_entries_from_db(conn)
+        finally:
+            conn.close()
+
+    valid: list[dict] = []
+    for entry in entries:
+        entry_id = str(entry.get("id") or "")
+        if entry_id and entry_id in blocked_ids:
+            continue
+
+        migrated = _migrate_entry_schema(entry)
+        if not migrated:
+            continue
+
+        image_path = Path(migrated.get("image_path") or "")
+        if not image_path.exists():
+            continue
+
+        valid.append(migrated)
+
+    return valid

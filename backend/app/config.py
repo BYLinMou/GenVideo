@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     character_ref_dir: str = Field(default="assets/character_refs", alias="CHARACTER_REF_DIR")
     scene_cache_dir: str = Field(default="assets/scene_cache/images", alias="SCENE_CACHE_DIR")
     scene_cache_index_path: str = Field(default="assets/scene_cache/index.json", alias="SCENE_CACHE_INDEX_PATH")
+    scene_cache_db_path: str = Field(default="assets/scene_cache/scene_cache.db", alias="SCENE_CACHE_DB_PATH")
     log_dir: str = Field(default="logs", alias="LOG_DIR")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     cors_allow_origins: str = Field(default="*", alias="CORS_ALLOW_ORIGINS")
