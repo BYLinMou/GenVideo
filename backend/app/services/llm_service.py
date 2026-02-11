@@ -8,10 +8,13 @@ import httpx
 
 from ..config import settings
 from ..models import CharacterSuggestion
-from ..voice_catalog import recommend_voice
+from ..voice_catalog import VOICE_INFOS, recommend_voice
 
 
 logger = logging.getLogger(__name__)
+
+_VOICE_ID_SET = {item.id for item in VOICE_INFOS}
+_VOICE_NAME_TO_ID = {item.name.lower(): item.id for item in VOICE_INFOS}
 
 
 def _base_url(path: str) -> str:
@@ -210,16 +213,48 @@ def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
 
 def _character_prompt(text: str, depth: str) -> str:
     detail = "Output detailed fields" if depth == "detailed" else "Output concise fields"
+    voice_lines = "\n".join(
+        f"- {voice.id} | {voice.name} | {voice.gender}/{voice.age} | {voice.description}" for voice in VOICE_INFOS
+    )
+    allowed_ids = ", ".join(sorted(_VOICE_ID_SET))
     return (
         "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
         f"{detail}. "
+        "voice_id must be selected strictly from the allowed voice IDs below. "
+        "Do not invent any new voice name or ID. "
+        "If unsure, choose the closest one from the list. "
         "JSON schema: "
         "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
         "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
         "\"confidence\":0.0}"
+        "\n\nAllowed voice IDs: "
+        f"{allowed_ids}"
+        "\nVoice catalog:"
+        f"\n{voice_lines}"
         "\n\nText:\n"
         f"{text[:14000]}"
     )
+
+
+def _normalize_voice_id(raw_voice: str | None, role: str, personality: str) -> str:
+    candidate = (raw_voice or "").strip()
+    if candidate in _VOICE_ID_SET:
+        return candidate
+
+    lowered = candidate.lower()
+    if lowered and lowered in _VOICE_NAME_TO_ID:
+        return _VOICE_NAME_TO_ID[lowered]
+
+    if lowered:
+        for voice_id in _VOICE_ID_SET:
+            if voice_id.lower() in lowered:
+                return voice_id
+
+    recommended = recommend_voice(role, personality)
+    if recommended in _VOICE_ID_SET:
+        return recommended
+
+    return VOICE_INFOS[0].id
 
 
 async def analyze_characters(text: str, depth: str, model_id: str | None) -> tuple[list[CharacterSuggestion], float, str]:
@@ -257,7 +292,7 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
             for item in raw_items:
                 role = str(item.get("role", "supporting"))
                 personality = str(item.get("personality", ""))
-                voice_id = str(item.get("voice_id") or recommend_voice(role, personality))
+                voice_id = _normalize_voice_id(item.get("voice_id"), role, personality)
                 characters.append(
                     CharacterSuggestion(
                         name=str(item.get("name", "character")),

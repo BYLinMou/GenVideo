@@ -62,6 +62,7 @@ async def generate_image(
     output_path: Path,
     resolution: tuple[int, int],
     reference_image_path: str | None = None,
+    aspect_ratio: str | None = None,
 ) -> Path:
     if not settings.image_api_key:
         return await _placeholder_image(prompt, output_path, resolution)
@@ -75,6 +76,8 @@ async def generate_image(
         "messages": _build_messages(prompt, reference_image_path=reference_image_path),
         "stream": True,
     }
+    if aspect_ratio:
+        payload["extra_body"] = {"aspect_ratio": aspect_ratio}
     url = f"{settings.image_api_url.rstrip('/')}/chat/completions"
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -136,6 +139,8 @@ async def generate_image(
             "messages": _build_messages(retry_prompt, reference_image_path=reference_image_path),
             "stream": True,
         }
+        if aspect_ratio:
+            retry_payload["extra_body"] = {"aspect_ratio": aspect_ratio}
         try:
             return await asyncio.wait_for(_remote_generate(retry_payload), timeout=45)
         except Exception as retry_error:
@@ -148,6 +153,7 @@ async def use_reference_or_generate(
     output_path: Path,
     resolution: tuple[int, int],
     reference_image_path: str | None,
+    aspect_ratio: str | None = None,
 ) -> Path:
     try:
         return await generate_image(
@@ -155,6 +161,7 @@ async def use_reference_or_generate(
             output_path=output_path,
             resolution=resolution,
             reference_image_path=reference_image_path,
+            aspect_ratio=aspect_ratio,
         )
     except Exception:
         if reference_image_path:

@@ -74,6 +74,7 @@ def _build_motion_image_clip(
     image_path: str,
     duration: float,
     resolution: tuple[int, int],
+    motion: str,
 ):
     target_w, target_h = resolution
     safe_duration = max(duration, 0.1)
@@ -101,10 +102,24 @@ def _build_motion_image_clip(
     overflow_x = max(0.0, float(final_w - target_w))
     overflow_y = max(0.0, float(final_h - target_h))
 
-    if overflow_y > 1.0:
+    vertical_possible = overflow_y > 1.0
+    horizontal_possible = overflow_x > 1.0
+
+    target_motion = motion or "vertical"
+    if target_motion not in {"vertical", "horizontal", "auto"}:
+        target_motion = "vertical"
+
+    if target_motion == "vertical":
+        motion_axis = "vertical" if vertical_possible else ("horizontal" if horizontal_possible else "none")
+    elif target_motion == "horizontal":
+        motion_axis = "horizontal" if horizontal_possible else ("vertical" if vertical_possible else "none")
+    else:
+        motion_axis = "vertical" if vertical_possible else ("horizontal" if horizontal_possible else "none")
+
+    if motion_axis == "vertical":
         start_x, end_x = -overflow_x / 2.0, -overflow_x / 2.0
         start_y, end_y = 0.0, -overflow_y
-    elif overflow_x > 1.0:
+    elif motion_axis == "horizontal":
         start_x, end_x = 0.0, -overflow_x
         start_y, end_y = -overflow_y / 2.0, -overflow_y / 2.0
     else:
@@ -128,8 +143,14 @@ def _render_clip_sync(
     fps: int,
     resolution: tuple[int, int],
     subtitle_style: str,
+    camera_motion: str,
 ) -> None:
-    image_clip = _build_motion_image_clip(image_path=image_path, duration=duration, resolution=resolution)
+    image_clip = _build_motion_image_clip(
+        image_path=image_path,
+        duration=duration,
+        resolution=resolution,
+        motion=camera_motion,
+    )
     audio_clip = AudioFileClip(audio_path)
     base = image_clip.with_audio(audio_clip)
     subtitle = _subtitle_clip(text, duration, resolution, subtitle_style)
@@ -235,6 +256,7 @@ async def _resolve_segment_image(
         output_path=image_path,
         resolution=resolution,
         reference_image_path=character.reference_image_path,
+        aspect_ratio=payload.image_aspect_ratio,
     )
 
     if payload.enable_scene_image_reuse:
@@ -318,6 +340,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 payload.fps,
                 resolution,
                 payload.subtitle_style,
+                payload.camera_motion,
             )
             clip_paths.append(str(clip_path))
 

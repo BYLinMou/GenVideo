@@ -177,6 +177,19 @@ label {
   font-weight: 600;
 }
 
+.aspect-option-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.aspect-icon {
+  display: inline-block;
+  border: 2px solid #98a2b3;
+  border-radius: 4px;
+  background: #f9fafb;
+}
+
 .upload-btn {
   display: inline-flex;
   align-items: center;

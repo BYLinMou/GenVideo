@@ -19,7 +19,9 @@ const zhCN = {
     maxSegmentGroups: '最大处理段数',
     maxSegmentHelp: '0 表示处理全部段',
     resolution: '分辨率',
+    imageAspectRatio: '图片比例（Poe）',
     subtitleStyle: '字幕样式',
+    cameraMotion: '镜头运动',
     fps: 'FPS',
     sceneReuse: '启用图片复用缓存',
     textInput: '小说文本',
@@ -41,10 +43,14 @@ const zhCN = {
     resolution1080x1920: '1080x1920（竖屏）',
     resolution720x1280: '720x1280（竖屏）',
     resolution1920x1080: '1920x1080（横屏）',
+    aspectUnspecified: '不指定',
     subtitleBasic: '基础',
     subtitleHighlight: '高亮',
     subtitleDanmaku: '弹幕',
     subtitleCenter: '居中',
+    cameraMotionVertical: '上→下（推荐）',
+    cameraMotionHorizontal: '左→右',
+    cameraMotionAuto: '自动',
     unavailable: '不可用'
   },
   action: {
@@ -104,3 +110,4 @@ const zhCN = {
 }
 
 export default zhCN
+

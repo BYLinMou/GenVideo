@@ -77,7 +77,9 @@ class GenerateVideoRequest(BaseModel):
     sentences_per_segment: int = Field(default=5, ge=1, le=50)
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1080x1920"
+    image_aspect_ratio: str | None = None
     subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
+    camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     model_id: str | None = None
     enable_scene_image_reuse: bool = True

@@ -28,7 +28,9 @@ const form = reactive({
   sentences_per_segment: 5,
   max_segment_groups: 0,
   resolution: '1080x1920',
+  image_aspect_ratio: '',
   subtitle_style: 'highlight',
+  camera_motion: 'vertical',
   fps: 30,
   enable_scene_image_reuse: true
 })
@@ -79,6 +81,42 @@ const refPicker = reactive({
 })
 
 const generatingRef = reactive({})
+
+const aspectRatioOptions = [
+  { value: '', label: t('option.aspectUnspecified') },
+  { value: '21:9', label: '21:9' },
+  { value: '16:9', label: '16:9' },
+  { value: '3:2', label: '3:2' },
+  { value: '4:3', label: '4:3' },
+  { value: '5:4', label: '5:4' },
+  { value: '1:1', label: '1:1' },
+  { value: '4:5', label: '4:5' },
+  { value: '3:4', label: '3:4' },
+  { value: '2:3', label: '2:3' },
+  { value: '9:16', label: '9:16' }
+]
+
+function aspectRatioIconStyle(value) {
+  if (!value) {
+    return { width: '16px', height: '12px' }
+  }
+  const parts = value.split(':')
+  const widthRaw = Number(parts[0])
+  const heightRaw = Number(parts[1])
+  if (!widthRaw || !heightRaw) {
+    return { width: '16px', height: '12px' }
+  }
+
+  const maxSize = 18
+  const minSize = 8
+  if (widthRaw >= heightRaw) {
+    const iconHeight = Math.max(minSize, Math.round((maxSize * heightRaw) / widthRaw))
+    return { width: `${maxSize}px`, height: `${iconHeight}px` }
+  }
+
+  const iconWidth = Math.max(minSize, Math.round((maxSize * widthRaw) / heightRaw))
+  return { width: `${iconWidth}px`, height: `${maxSize}px` }
+}
 
 function formatModelLabel(item) {
   return `${item.name} (${item.provider})${item.available ? '' : ` [${t('option.unavailable')}]`}`
@@ -328,9 +366,13 @@ async function runGenerate() {
       max_segment_groups: form.max_segment_groups,
       resolution: form.resolution,
       subtitle_style: form.subtitle_style,
+      camera_motion: form.camera_motion,
       fps: form.fps,
       model_id: selectedModel.value || null,
       enable_scene_image_reuse: form.enable_scene_image_reuse
+    }
+    if (form.image_aspect_ratio) {
+      payload.image_aspect_ratio = form.image_aspect_ratio
     }
     const data = await api.generateVideo(payload)
     job.id = data.job_id
@@ -470,12 +512,38 @@ onUnmounted(() => {
         </div>
 
         <div>
+          <label>{{ t('field.imageAspectRatio') }}</label>
+          <el-select v-model="form.image_aspect_ratio" clearable style="width: 100%">
+            <el-option
+              v-for="item in aspectRatioOptions"
+              :key="item.value || 'none'"
+              :label="item.label"
+              :value="item.value"
+            >
+              <span class="aspect-option-row">
+                <span class="aspect-icon" :style="aspectRatioIconStyle(item.value)"></span>
+                <span>{{ item.label }}</span>
+              </span>
+            </el-option>
+          </el-select>
+        </div>
+
+        <div>
           <label>{{ t('field.subtitleStyle') }}</label>
           <el-select v-model="form.subtitle_style" style="width: 100%">
             <el-option :label="t('option.subtitleBasic')" value="basic" />
             <el-option :label="t('option.subtitleHighlight')" value="highlight" />
             <el-option :label="t('option.subtitleDanmaku')" value="danmaku" />
             <el-option :label="t('option.subtitleCenter')" value="center" />
+          </el-select>
+        </div>
+
+        <div>
+          <label>{{ t('field.cameraMotion') }}</label>
+          <el-select v-model="form.camera_motion" style="width: 100%">
+            <el-option :label="t('option.cameraMotionVertical')" value="vertical" />
+            <el-option :label="t('option.cameraMotionHorizontal')" value="horizontal" />
+            <el-option :label="t('option.cameraMotionAuto')" value="auto" />
           </el-select>
         </div>
 
