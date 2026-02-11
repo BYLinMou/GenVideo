@@ -9698,6 +9698,109 @@
         ],
         "scene_summary": "dimly lit narrow alley | tight grip on fruit knife, eyes scanning, stumbling"
       }
+    },
+    {
+      "id": "a3739975848d412394dd27307347966c",
+      "created_at": "2026-02-11T14:52:01.213166+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_145201_cac1e352.png",
+      "prompt": "high school classroom | holding a textbook with right hand",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "holding a textbook with right hand",
+        "location_hint": "high school classroom",
+        "segment_text": "一天前，他本是蓝星的一名高三学子，家庭幸福美满，成绩稳定在中上游水平，日后考一个好大学是绝对没有问题的。",
+        "scene_elements": [
+          "desk",
+          "chalkboard",
+          "windows",
+          "sunlight",
+          "rows of desks",
+          "school posters"
+        ],
+        "action_keywords": [
+          "holding",
+          "textbook",
+          "right hand"
+        ],
+        "location_keywords": [
+          "classroom",
+          "high school",
+          "school hallway"
+        ],
+        "mood": "hopeful nostalgic",
+        "shot_type": "medium shot"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "holding a textbook with right hand",
+        "location_hint": "high school classroom",
+        "segment_text": "一天前，他本是蓝星的一名高三学子，家庭幸福美满，成绩稳定在中上游水平，日后考一个好大学是绝对没有问题的。",
+        "scene_elements": [
+          "desk",
+          "chalkboard",
+          "windows",
+          "sunlight",
+          "rows of desks",
+          "school posters"
+        ],
+        "action_keywords": [
+          "holding",
+          "textbook",
+          "right hand"
+        ],
+        "location_keywords": [
+          "classroom",
+          "high school",
+          "school hallway"
+        ],
+        "mood": "hopeful nostalgic",
+        "shot_type": "medium shot",
+        "action_tokens": [
+          "holding",
+          "textbook",
+          "with",
+          "right",
+          "hand",
+          "一天前",
+          "他本是蓝星的一名高三学子",
+          "家庭幸福美满",
+          "成绩稳定在中上游水平",
+          "日后考一个好大学是绝对没有问题的"
+        ],
+        "location_tokens": [
+          "high",
+          "school",
+          "classroom",
+          "hallway"
+        ],
+        "scene_tokens": [
+          "一天前",
+          "他本是蓝星的一名高三学子",
+          "家庭幸福美满",
+          "成绩稳定在中上游水平",
+          "日后考一个好大学是绝对没有问题的",
+          "desk",
+          "chalkboard",
+          "windows",
+          "sunlight",
+          "rows",
+          "of",
+          "desks",
+          "school",
+          "posters",
+          "hopeful",
+          "nostalgic",
+          "medium",
+          "shot"
+        ],
+        "scene_summary": "high school classroom | holding a textbook with right hand"
+      }
     }
   ]
 }
