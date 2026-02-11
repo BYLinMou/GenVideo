@@ -105,6 +105,7 @@ const nameReplace = reactive({
 
 const replacementEntries = ref([])
 const novelAliases = ref([])
+const customAliasInput = ref('')
 
 const replacementEnabledCount = computed(() => {
   return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
@@ -276,11 +277,12 @@ function detectNameReplacementCandidates() {
 
   replacementEntries.value = candidates.map((item) => {
     const previous = previousMap.get(item.word)
+    const replacement = previous?.replacement || ''
     return {
       word: item.word,
       count: item.count,
-      enabled: previous?.enabled || false,
-      replacement: previous?.replacement || ''
+      enabled: Boolean(previous?.enabled && replacement.trim()),
+      replacement
     }
   })
 
@@ -293,6 +295,13 @@ function detectNameReplacementCandidates() {
 
 function clearNameReplacementEntries() {
   replacementEntries.value = []
+}
+
+function syncReplacementEntry(entry) {
+  if (!entry) return
+  if (!(entry.replacement || '').trim()) {
+    entry.enabled = false
+  }
 }
 
 function removeChapterHeadings() {
@@ -353,6 +362,22 @@ function applyNameReplacements(text) {
     transformed = transformed.split(pair.from).join(pair.to)
   }
   return transformed
+}
+
+function applyReplacementsToSourceText() {
+  if (!form.text.trim()) {
+    ElMessage.warning('请先输入文本')
+    return
+  }
+
+  const transformed = applyNameReplacements(form.text)
+  if (transformed === form.text) {
+    ElMessage.info('没有可应用的替换项')
+    return
+  }
+
+  form.text = transformed
+  ElMessage.success('已将字典替换应用到上方文本')
 }
 
 function resetJob() {
@@ -689,6 +714,16 @@ function applyAlias(alias) {
   ElMessage.success(`已应用别名：${alias}`)
 }
 
+function applyCustomAlias() {
+  const alias = (customAliasInput.value || '').trim()
+  if (!alias) {
+    ElMessage.warning('请先输入别名')
+    return
+  }
+  applyAlias(alias)
+  customAliasInput.value = ''
+}
+
 function formatFileSize(bytes) {
   const value = Number(bytes || 0)
   if (!Number.isFinite(value) || value <= 0) return '0 B'
@@ -959,6 +994,7 @@ onUnmounted(() => {
           <span>启用名字替换字典</span>
         </div>
         <div class="actions">
+          <el-button type="primary" @click="applyReplacementsToSourceText">执行替换</el-button>
           <el-button @click="detectNameReplacementCandidates">检测高频词</el-button>
           <el-button @click="clearNameReplacementEntries">清空字典</el-button>
           <span class="muted" v-if="replacementEntries.length">
@@ -969,6 +1005,8 @@ onUnmounted(() => {
 
       <div class="replace-toolbar">
         <div class="actions">
+          <el-input v-model="customAliasInput" placeholder="手动输入别名" clearable style="max-width: 260px" @keyup.enter="applyCustomAlias" />
+          <el-button @click="applyCustomAlias">添加</el-button>
           <el-button :loading="loading.aliases" @click="generateNovelAliases">生成小说别名（10个）</el-button>
           <el-button :disabled="loading.aliases" @click="generateNovelAliases">重新生成</el-button>
           <span class="muted" v-if="novelAliases.length">点击下方任意别名即可应用</span>
@@ -988,11 +1026,11 @@ onUnmounted(() => {
 
       <div v-if="replacementEntries.length" class="replace-list">
         <div class="replace-item" v-for="entry in replacementEntries" :key="entry.word">
-          <el-checkbox v-model="entry.enabled" />
+          <el-checkbox v-model="entry.enabled" :disabled="!entry.replacement.trim()" />
           <span class="word">{{ entry.word }}</span>
           <span class="muted">×{{ entry.count }}</span>
           <span class="arrow">→</span>
-          <el-input v-model="entry.replacement" placeholder="替换成..." clearable />
+          <el-input v-model="entry.replacement" placeholder="替换成..." clearable @input="syncReplacementEntry(entry)" />
         </div>
       </div>
 
