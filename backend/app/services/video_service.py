@@ -14,7 +14,13 @@ from ..config import project_path, settings
 from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
 from ..state import job_store
 from .image_service import use_reference_or_generate
-from .llm_service import group_sentences, segment_by_fixed, segment_by_smart, split_sentences
+from .llm_service import (
+    build_segment_image_prompt,
+    group_sentences,
+    segment_by_fixed,
+    segment_by_smart,
+    split_sentences,
+)
 from .scene_cache_service import (
     build_scene_descriptor,
     ensure_scene_cache_paths,
@@ -433,11 +439,23 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             )
 
             character = _pick_character(payload.characters, segment_text)
-            prompt = f"{character.base_prompt or character.appearance or character.name}, {segment_text}"
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
             clip_path = clip_root / f"clip_{index:04d}.mp4"
+
+            prompt_task = asyncio.create_task(
+                build_segment_image_prompt(
+                    character=character,
+                    segment_text=segment_text,
+                    model_id=payload.model_id,
+                )
+            )
+            audio_task = asyncio.create_task(
+                synthesize_tts(text=segment_text, voice=character.voice_id, output_path=audio_path)
+            )
+
+            prompt = await prompt_task
 
             image_task = asyncio.create_task(
                 _resolve_segment_image(
@@ -448,9 +466,6 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     image_path=image_path,
                     resolution=resolution,
                 )
-            )
-            audio_task = asyncio.create_task(
-                synthesize_tts(text=segment_text, voice=character.voice_id, output_path=audio_path)
             )
 
             image_bundle, audio_bundle = await asyncio.gather(image_task, audio_task)

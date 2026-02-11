@@ -166,6 +166,117 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
     return segment_by_sentence_groups(text, sentences_per_segment=5)
 
 
+def _clean_text(value: str | None, limit: int) -> str:
+    return re.sub(r"\s+", " ", (value or "")).strip()[:limit]
+
+
+def _character_identity_guard(character: CharacterSuggestion) -> str:
+    name = _clean_text(character.name, 80) or "main character"
+    appearance = _clean_text(character.appearance, 500)
+    base_prompt = _clean_text(character.base_prompt, 500)
+    personality = _clean_text(character.personality, 240)
+    has_reference = bool(character.reference_image_path)
+
+    anchor_parts = [part for part in [appearance, base_prompt] if part]
+    if not anchor_parts:
+        anchor_parts = [name]
+    anchors = "; ".join(anchor_parts)
+    personality_clause = f" Character personality and vibe: {personality}." if personality else ""
+    reference_clause = (
+        f"Use the provided reference image only for identity matching of {name} "
+        "(face, hair, body shape, outfit details). "
+        "Do not copy composition or background from the reference image. "
+        if has_reference
+        else "No reference image is available; enforce identity from appearance anchors only. "
+    )
+
+    return (
+        "Character consistency is mandatory across frames. "
+        f"{reference_clause}"
+        "Never change core identity (age/gender/face/hair/outfit signature). "
+        f"Character appearance anchors: {anchors}."
+        f"{personality_clause}"
+    )
+
+
+def _fallback_segment_image_prompt(character: CharacterSuggestion, segment_text: str) -> str:
+    guard = _character_identity_guard(character)
+    scene_text = _clean_text(segment_text, 1200)
+
+    return (
+        f"{guard} "
+        "Build one single image frame according to this current plot segment: "
+        f"{scene_text}. "
+        "Background and action must come from the current plot segment. "
+        "anime-style cinematic illustration, detailed lighting, clean composition, no text, no watermark"
+    )
+
+
+async def build_segment_image_prompt(
+    character: CharacterSuggestion,
+    segment_text: str,
+    model_id: str | None,
+) -> str:
+    fallback = _fallback_segment_image_prompt(character, segment_text)
+    guard = _character_identity_guard(character)
+    scene_text = _clean_text(segment_text, 1200)
+    if not settings.llm_api_key:
+        return fallback
+
+    selected_model = model_id or settings.llm_default_model
+    prompt = {
+        "task": "build_image_prompt_for_story_segment",
+        "rules": [
+            "Keep character identity highly consistent across scenes.",
+            "Reference image (if present) is for character look only, never for scene/background.",
+            "Scene/background/action must be inferred from current segment text.",
+            "Output one concise production-ready prompt in English.",
+            "No markdown, no explanation.",
+        ],
+        "character": {
+            "name": _clean_text(character.name, 120),
+            "appearance": _clean_text(character.appearance, 800),
+            "personality": _clean_text(character.personality, 400),
+            "base_prompt": _clean_text(character.base_prompt, 800),
+            "has_reference_image": bool(character.reference_image_path),
+        },
+        "current_segment": _clean_text(segment_text, 1800),
+        "output_schema": {"prompt": ""},
+    }
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+        "temperature": 0.15,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.llm_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(_base_url("/chat/completions"), headers=headers, json=payload)
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            parsed = _extract_json_object(content)
+            candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
+            if candidate:
+                return (
+                    f"{guard} "
+                    f"Current plot segment: {scene_text}. "
+                    "Scene/background/action must follow current plot segment. "
+                    f"Additional style and composition details: {candidate}"
+                )
+    except Exception:
+        logger.exception("LLM image prompt build failed, using fallback prompt")
+
+    return fallback
+
+
 def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
     names = re.findall(r"[\u4e00-\u9fff]{2,3}", re.sub(r"\s+", " ", text))
     ignored = {
