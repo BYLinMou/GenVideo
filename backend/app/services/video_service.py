@@ -41,25 +41,26 @@ _SUBTITLE_FONT_RESOLVED = False
 _SUBTITLE_FONT_PATH: str | None = None
 
 _VIDEO_AUDIO_BITRATE = "96k"
+_TTS_GAIN = 1.15
 
 
 def _resolve_render_profile(mode: str | None) -> dict:
     key = (mode or "").strip().lower()
     if key == "quality":
         return {
-            "clip_preset": "medium",
-            "clip_crf": "22",
+            "clip_preset": "slow",
+            "clip_crf": "20",
             "final_preset": "medium",
-            "final_crf": "23",
+            "final_crf": "21",
             "clip_fps": None,
             "bgm_video_copy": False,
         }
     if key == "balanced":
         return {
             "clip_preset": "veryfast",
-            "clip_crf": "25",
+            "clip_crf": "23",
             "final_preset": "veryfast",
-            "final_crf": "26",
+            "final_crf": "24",
             "clip_fps": None,
             "bgm_video_copy": True,
         }
@@ -345,7 +346,7 @@ def _render_clip_sync(
         resolution=resolution,
         motion=camera_motion,
     )
-    audio_clip = AudioFileClip(audio_path)
+    audio_clip = AudioFileClip(audio_path).with_volume_scaled(_TTS_GAIN)
     base = image_clip.with_audio(audio_clip)
     subtitle_clips = _subtitle_clips(text, duration, resolution, subtitle_style)
     composed = CompositeVideoClip([base, *subtitle_clips], size=resolution).with_duration(duration)

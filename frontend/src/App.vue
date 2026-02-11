@@ -34,9 +34,9 @@ const form = reactive({
   subtitle_style: 'white_black',
   camera_motion: 'vertical',
   fps: 30,
-  render_mode: 'fast',
+  render_mode: 'balanced',
   bgm_enabled: true,
-  bgm_volume: 0.12,
+  bgm_volume: 0.08,
   enable_scene_image_reuse: true,
   scene_reuse_no_repeat_window: 3
 })

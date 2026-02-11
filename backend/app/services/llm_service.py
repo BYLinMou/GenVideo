@@ -108,33 +108,58 @@ def split_sentences(text: str) -> list[str]:
         "!",
         "?",
     }
+    opening_marks = {"【", "[", "（", "(", "「", "『", "“", '"', "‘", "'"}
+    closing_marks = {"】", "]", "）", ")", "」", "』", "”", '"', "’", "'"}
+
     sentences: list[str] = []
     current_chars: list[str] = []
     length = len(clean)
 
-    for index, char in enumerate(clean):
-        current_chars.append(char)
-        if char not in delimiters:
-            continue
-
-        next_char = clean[index + 1] if index + 1 < length else ""
-        prev_char = clean[index - 1] if index - 1 >= 0 else ""
-
-        if next_char in delimiters:
-            continue
-
-        # Avoid splitting each char when broken encoding appears as "????".
-        if char == "?" and prev_char == "?":
-            continue
-
+    def _flush_current() -> None:
         candidate = "".join(current_chars).strip()
         if candidate:
             sentences.append(candidate)
-        current_chars = []
+        current_chars.clear()
 
-    tail = "".join(current_chars).strip()
-    if tail:
-        sentences.append(tail)
+    index = 0
+    while index < length:
+        char = clean[index]
+
+        if char in opening_marks and current_chars:
+            _flush_current()
+
+        current_chars.append(char)
+
+        if char in delimiters:
+            next_char = clean[index + 1] if index + 1 < length else ""
+            prev_char = clean[index - 1] if index - 1 >= 0 else ""
+
+            if next_char in delimiters:
+                index += 1
+                continue
+
+            # Avoid splitting each char when broken encoding appears as "????".
+            if char == "?" and prev_char == "?":
+                index += 1
+                continue
+
+            tail_index = index + 1
+            while tail_index < length and clean[tail_index] in closing_marks:
+                current_chars.append(clean[tail_index])
+                tail_index += 1
+
+            _flush_current()
+            index = tail_index
+            continue
+
+        if char in closing_marks:
+            next_char = clean[index + 1] if index + 1 < length else ""
+            if next_char and next_char not in closing_marks and next_char not in delimiters:
+                _flush_current()
+
+        index += 1
+
+    _flush_current()
 
     return sentences
 

@@ -101,11 +101,11 @@ class GenerateVideoRequest(BaseModel):
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.12, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     model_id: str | None = None
     enable_scene_image_reuse: bool = True
     scene_reuse_no_repeat_window: int = Field(default=3, ge=0, le=100)
-    render_mode: Literal["fast", "balanced", "quality"] = "fast"
+    render_mode: Literal["fast", "balanced", "quality"] = "balanced"
 
 
 class GenerateVideoResponse(BaseModel):
@@ -115,7 +115,7 @@ class GenerateVideoResponse(BaseModel):
 
 class RemixBgmRequest(BaseModel):
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.12, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
 
 
