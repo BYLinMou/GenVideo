@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from threading import Thread
 from uuid import uuid4
@@ -26,6 +27,9 @@ from .tts_service import synthesize_tts
 
 logger = logging.getLogger(__name__)
 
+_SUBTITLE_FONT_RESOLVED = False
+_SUBTITLE_FONT_PATH: str | None = None
+
 
 def _parse_resolution(value: str) -> tuple[int, int]:
     try:
@@ -44,7 +48,106 @@ def _pick_character(characters: list[CharacterSuggestion], text: str) -> Charact
     return characters[0]
 
 
-def _subtitle_clip(text: str, duration: float, resolution: tuple[int, int], style: str):
+def _resolve_subtitle_font_path() -> str | None:
+    configured = (settings.subtitle_font_path or "").strip()
+    candidates: list[Path] = []
+    if configured:
+        raw = Path(configured)
+        candidates.append(raw if raw.is_absolute() else project_path(configured))
+
+    candidates.extend(
+        [
+            project_path("assets/fonts/NotoSansSC-Regular.otf"),
+            project_path("assets/fonts/NotoSansCJKsc-Regular.otf"),
+            Path("C:/Windows/Fonts/msyh.ttc"),
+            Path("C:/Windows/Fonts/msyhbd.ttc"),
+            Path("C:/Windows/Fonts/simhei.ttf"),
+            Path("C:/Windows/Fonts/simsun.ttc"),
+            Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+            Path("/System/Library/Fonts/PingFang.ttc"),
+        ]
+    )
+
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
+def _subtitle_font_path() -> str | None:
+    global _SUBTITLE_FONT_RESOLVED, _SUBTITLE_FONT_PATH
+    if _SUBTITLE_FONT_RESOLVED:
+        return _SUBTITLE_FONT_PATH
+
+    _SUBTITLE_FONT_PATH = _resolve_subtitle_font_path()
+    _SUBTITLE_FONT_RESOLVED = True
+    if _SUBTITLE_FONT_PATH:
+        logger.info("Subtitle font: %s", _SUBTITLE_FONT_PATH)
+    else:
+        logger.warning("No subtitle font found for CJK text; set SUBTITLE_FONT_PATH if subtitle is garbled")
+    return _SUBTITLE_FONT_PATH
+
+
+def _split_subtitle_sentences(text: str) -> list[str]:
+    clean = re.sub(r"\s+", " ", text.strip())
+    if not clean:
+        return []
+
+    delimiters = {"。", "！", "？", "；", ".", "!", "?", ";"}
+    units: list[str] = []
+    current_chars: list[str] = []
+    length = len(clean)
+
+    for index, char in enumerate(clean):
+        current_chars.append(char)
+        if char not in delimiters:
+            continue
+
+        next_char = clean[index + 1] if index + 1 < length else ""
+        prev_char = clean[index - 1] if index - 1 >= 0 else ""
+        if next_char in delimiters:
+            continue
+        if char == "?" and prev_char == "?":
+            continue
+
+        sentence = "".join(current_chars).strip()
+        if sentence:
+            units.append(sentence)
+        current_chars = []
+
+    tail = "".join(current_chars).strip()
+    if tail:
+        units.append(tail)
+
+    return units or [clean]
+
+
+def _subtitle_timeline(text: str, duration: float) -> list[tuple[str, float, float]]:
+    units = _split_subtitle_sentences(text)
+    if not units:
+        return []
+
+    safe_duration = max(duration, 0.1)
+    weights = [max(1, len(re.sub(r"\s+", "", item))) for item in units]
+    total_weight = sum(weights)
+
+    timeline: list[tuple[str, float, float]] = []
+    cursor = 0.0
+    for index, unit in enumerate(units):
+        if index == len(units) - 1:
+            end_time = safe_duration
+        else:
+            end_time = min(safe_duration, cursor + (safe_duration * weights[index] / total_weight))
+        if end_time <= cursor:
+            end_time = min(safe_duration, cursor + 0.05)
+        timeline.append((unit, cursor, end_time))
+        cursor = end_time
+
+    return timeline
+
+
+def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], style: str) -> list[TextClip]:
     width, height = resolution
     fontsize = 56 if style == "center" else 46
     color = "#FFFFFF"
@@ -58,16 +161,40 @@ def _subtitle_clip(text: str, duration: float, resolution: tuple[int, int], styl
     elif style == "highlight":
         color = "#F9E96A"
 
-    clip = TextClip(
-        text=text,
-        font_size=fontsize,
-        color=color,
-        stroke_color=stroke_color,
-        stroke_width=2,
-        method="caption",
-        size=(width - 120, None),
-    )
-    return clip.with_duration(duration).with_position(("center", y_pos))
+    font_path = _subtitle_font_path()
+    subtitles: list[TextClip] = []
+    for sentence, start_at, end_at in _subtitle_timeline(text, duration):
+        text_kwargs = {
+            "text": sentence,
+            "font_size": fontsize,
+            "color": color,
+            "stroke_color": stroke_color,
+            "stroke_width": 2,
+            "method": "caption",
+            "size": (width - 120, None),
+        }
+        if font_path:
+            text_kwargs["font"] = font_path
+
+        try:
+            clip = TextClip(**text_kwargs)
+        except Exception:
+            if not font_path:
+                logger.exception("Subtitle render failed")
+                continue
+            logger.warning("Subtitle render failed with font '%s', retrying default font", font_path)
+            text_kwargs.pop("font", None)
+            try:
+                clip = TextClip(**text_kwargs)
+            except Exception:
+                logger.exception("Subtitle render failed after retry")
+                continue
+
+        subtitles.append(
+            clip.with_start(start_at).with_duration(max(0.05, end_at - start_at)).with_position(("center", y_pos))
+        )
+
+    return subtitles
 
 
 def _build_motion_image_clip(
@@ -153,14 +280,15 @@ def _render_clip_sync(
     )
     audio_clip = AudioFileClip(audio_path)
     base = image_clip.with_audio(audio_clip)
-    subtitle = _subtitle_clip(text, duration, resolution, subtitle_style)
-    composed = CompositeVideoClip([base, subtitle], size=resolution)
+    subtitle_clips = _subtitle_clips(text, duration, resolution, subtitle_style)
+    composed = CompositeVideoClip([base, *subtitle_clips], size=resolution).with_duration(duration)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     composed.write_videofile(str(output_path), fps=fps, audio_codec="aac", codec="libx264", logger=None)
 
     composed.close()
-    subtitle.close()
+    for subtitle in subtitle_clips:
+        subtitle.close()
     base.close()
     audio_clip.close()
     image_clip.close()

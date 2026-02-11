@@ -1,0 +1,58 @@
+{
+  "entries": [
+    {
+      "id": "c3f96fe13128429d8b7e2ebaf1f290a0",
+      "created_at": "2026-02-11T06:26:56.844163+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_062656_e185bbf7.png",
+      "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。",
+      "descriptor": {
+        "character_name": "林昭",
+        "character_role": "主角，潜龙渊的少年学徒，承受极端炼体与灵根觉醒的苦难",
+        "character_appearance": "细瘦的少年，皮肤苍白，常被药膏和血痕覆盖，眼神中带有坚韧的光芒",
+        "character_personality": "坚韧不拔、忍耐力极强、内心充满对自由与温暖的渴望，却极少流露情感",
+        "character_prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感",
+        "action_hint": "《鎮國靈根》 1. 冰冷的药液漫过脖颈时",
+        "location_hint": "",
+        "segment_text": "《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/林昭_5d69a62b.png",
+        "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。"
+      }
+    },
+    {
+      "id": "5d432fda8d87405881e3a46944b43879",
+      "created_at": "2026-02-11T06:28:05.078846+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_062805_ad4a90be.png",
+      "prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白, ”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。",
+      "descriptor": {
+        "character_name": "黑袍医师",
+        "character_role": "潜龙渊的医官，负责记录与评估学徒的药浴与炼体数据",
+        "character_appearance": "身着黑袍，面容冷峻，手指常带微光，动作机械且精准",
+        "character_personality": "冷漠、专业、毫无感情波动，只关注实验数据与结果",
+        "character_prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白",
+        "action_hint": "”黑袍医师的声音毫无起伏",
+        "location_hint": "手掌压在他单薄的肩膀上",
+        "segment_text": "”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/黑袍医师_c0c6007e.png",
+        "prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白, ”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。"
+      }
+    },
+    {
+      "id": "3159ba1faa7b4deb9a3fabae1550b7fa",
+      "created_at": "2026-02-11T06:30:02.390626+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_063002_f4fa501b.png",
+      "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。",
+      "descriptor": {
+        "character_name": "林昭",
+        "character_role": "主角，潜龙渊的少年学徒，承受极端炼体与灵根觉醒的苦难",
+        "character_appearance": "细瘦的少年，皮肤苍白，常被药膏和血痕覆盖，眼神中带有坚韧的光芒",
+        "character_personality": "坚韧不拔、忍耐力极强、内心充满对自由与温暖的渴望，却极少流露情感",
+        "character_prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感",
+        "action_hint": "剧痛瞬间炸开",
+        "location_hint": "",
+        "segment_text": "剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/林昭_5d69a62b.png",
+        "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。"
+      }
+    }
+  ]
+}

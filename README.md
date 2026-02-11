@@ -6,6 +6,7 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - Cancelable video jobs
 - Segment-clip preview before final video
 - Sentence-based grouping semantics
+- Subtitle rendering with CJK font auto-detection
 - Character reference-image library (select/upload/generate)
 - Per-character TTS voice selection from real voice list
 - Scene-image reuse cache with LLM text matching (cost reduction)
@@ -23,6 +24,7 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 
 - Sentence splitting supports punctuation: `。！？!?；;，,`
 - `sentences_per_segment = N` means **N sentences per segment group**
+- Recommended default is `sentences_per_segment = 1` for sentence-by-sentence pacing
 - One segment group generates one clip
 - One segment group generates one image prompt call (reference image is passed when available)
 - Before generating a new segment image, backend checks reusable cached images by structured text descriptor
@@ -92,6 +94,11 @@ Request field (generate video):
 - `enable_scene_image_reuse` (default `true`):
   - `true`: try cache matching first, generate only if no suitable match
   - `false`: always generate new image for each segment
+
+Subtitle font:
+
+- `SUBTITLE_FONT_PATH` (optional): explicit font file for subtitles
+- If empty, backend tries common CJK fonts automatically (e.g. `msyh.ttc` on Windows)
 
 ## Notes
 

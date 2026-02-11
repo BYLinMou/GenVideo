@@ -68,9 +68,7 @@ def split_sentences(text: str) -> list[str]:
         "\uff01",  # exclamation
         "\uff1f",  # question
         "\uff1b",  # semicolon
-        "\uff0c",  # comma
         ";",
-        ",",
         "!",
         "?",
     }

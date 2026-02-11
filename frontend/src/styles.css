@@ -62,6 +62,44 @@ label {
   color: #344054;
 }
 
+.replace-toolbar {
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid #e4e7ec;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.replace-list {
+  margin-top: 10px;
+  border: 1px solid #eaecf0;
+  border-radius: 8px;
+  max-height: 280px;
+  overflow: auto;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.replace-item {
+  display: grid;
+  grid-template-columns: auto auto auto auto 1fr;
+  align-items: center;
+  gap: 8px;
+  padding: 6px;
+  border: 1px solid #f2f4f7;
+  border-radius: 8px;
+}
+
+.replace-item .word {
+  font-weight: 600;
+  color: #101828;
+}
+
+.replace-item .arrow {
+  color: #667085;
+}
+
 .segments {
   margin: 0;
   padding-left: 20px;

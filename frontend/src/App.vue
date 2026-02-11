@@ -25,7 +25,7 @@ const form = reactive({
   text: '',
   analysis_depth: 'detailed',
   segment_method: 'sentence',
-  sentences_per_segment: 5,
+  sentences_per_segment: 1,
   max_segment_groups: 0,
   resolution: '1080x1920',
   image_aspect_ratio: '',
@@ -81,6 +81,24 @@ const refPicker = reactive({
 })
 
 const generatingRef = reactive({})
+
+const nameReplace = reactive({
+  enabled: true,
+  maxCandidates: 24
+})
+
+const replacementEntries = ref([])
+
+const replacementEnabledCount = computed(() => {
+  return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
+})
+
+const replacedTextPreview = computed(() => applyNameReplacements(form.text))
+
+const hasReplacementEffect = computed(() => {
+  if (!nameReplace.enabled) return false
+  return replacedTextPreview.value !== form.text
+})
 
 const aspectRatioOptions = [
   { value: '', label: t('option.aspectUnspecified') },
@@ -153,6 +171,131 @@ function highlightText(text) {
 
 function highlightModelOption(item) {
   return highlightText(formatModelLabel(item))
+}
+
+function extractReplacementCandidates(text, limit = 24) {
+  const content = (text || '').trim()
+  if (!content) return []
+
+  const chineseStopwords = new Set([
+    '我们',
+    '你们',
+    '他们',
+    '她们',
+    '自己',
+    '这个',
+    '那个',
+    '这里',
+    '那里',
+    '什么',
+    '怎么',
+    '为什么',
+    '但是',
+    '然后',
+    '如果',
+    '因为',
+    '所以',
+    '已经',
+    '可以',
+    '不是',
+    '就是',
+    '一个',
+    '一种',
+    '一下',
+    '时候',
+    '今天',
+    '昨天',
+    '现在'
+  ])
+
+  const tokenCount = new Map()
+  const normalized = content.replace(/\s+/g, '')
+  const chineseBlocks = normalized.match(/[\u4e00-\u9fff]{2,}/g) || []
+
+  for (const block of chineseBlocks) {
+    for (let size = 2; size <= 4; size += 1) {
+      if (block.length < size) continue
+      for (let index = 0; index <= block.length - size; index += 1) {
+        const token = block.slice(index, index + size)
+        if (/^(.)\1+$/.test(token)) continue
+        tokenCount.set(token, (tokenCount.get(token) || 0) + 1)
+      }
+    }
+  }
+
+  const latinTokens = content.match(/\b[A-Za-z][A-Za-z0-9_'-]{1,30}\b/g) || []
+  for (const token of latinTokens) {
+    const normalizedToken = token.trim()
+    if (!normalizedToken) continue
+    tokenCount.set(normalizedToken, (tokenCount.get(normalizedToken) || 0) + 1)
+  }
+
+  return [...tokenCount.entries()]
+    .filter(([token, count]) => {
+      if (count < 2) return false
+      if (token.length < 2) return false
+      if (chineseStopwords.has(token)) return false
+      return true
+    })
+    .sort((a, b) => {
+      const scoreA = a[1] * a[0].length
+      const scoreB = b[1] * b[0].length
+      if (scoreA !== scoreB) return scoreB - scoreA
+      if (a[1] !== b[1]) return b[1] - a[1]
+      return b[0].length - a[0].length
+    })
+    .slice(0, Math.max(1, limit))
+    .map(([word, count]) => ({ word, count }))
+}
+
+function detectNameReplacementCandidates() {
+  if (!form.text.trim()) {
+    ElMessage.warning('请先输入文本')
+    return
+  }
+
+  const previousMap = new Map(replacementEntries.value.map((item) => [item.word, item]))
+  const candidates = extractReplacementCandidates(form.text, nameReplace.maxCandidates)
+
+  replacementEntries.value = candidates.map((item) => {
+    const previous = previousMap.get(item.word)
+    return {
+      word: item.word,
+      count: item.count,
+      enabled: previous?.enabled || false,
+      replacement: previous?.replacement || ''
+    }
+  })
+
+  if (!replacementEntries.value.length) {
+    ElMessage.warning('未检测到可替换的高频词（至少出现 2 次）')
+    return
+  }
+  ElMessage.success(`已检测到 ${replacementEntries.value.length} 个候选词`)
+}
+
+function clearNameReplacementEntries() {
+  replacementEntries.value = []
+}
+
+function activeReplacementPairs() {
+  return replacementEntries.value
+    .filter((item) => item.enabled && item.replacement.trim() && item.replacement.trim() !== item.word)
+    .map((item) => ({ from: item.word, to: item.replacement.trim() }))
+    .sort((a, b) => b.from.length - a.from.length)
+}
+
+function applyNameReplacements(text) {
+  const source = text || ''
+  if (!nameReplace.enabled) return source
+  const pairs = activeReplacementPairs()
+  if (!pairs.length) return source
+
+  let transformed = source
+  for (const pair of pairs) {
+    transformed = transformed.split(pair.from).join(pair.to)
+  }
+  return transformed
 }
 
 function resetJob() {
@@ -242,14 +385,15 @@ async function loadLogs() {
 }
 
 async function runAnalyze() {
-  if (!form.text.trim()) {
+  const textForRun = applyNameReplacements(form.text)
+  if (!textForRun.trim()) {
     ElMessage.warning(t('toast.textRequired'))
     return
   }
   loading.analyze = true
   try {
     const data = await api.analyzeCharacters({
-      text: form.text,
+      text: textForRun,
       analysis_depth: form.analysis_depth,
       model_id: selectedModel.value || null
     })
@@ -269,14 +413,15 @@ async function runAnalyze() {
 }
 
 async function runSegmentPreview() {
-  if (!form.text.trim()) {
+  const textForRun = applyNameReplacements(form.text)
+  if (!textForRun.trim()) {
     ElMessage.warning(t('toast.textRequired'))
     return
   }
   loading.segment = true
   try {
     const data = await api.segmentText({
-      text: form.text,
+      text: textForRun,
       method: form.segment_method,
       sentences_per_segment: form.sentences_per_segment,
       model_id: selectedModel.value || null
@@ -345,7 +490,8 @@ function startPolling() {
 }
 
 async function runGenerate() {
-  if (!form.text.trim()) {
+  const textForRun = applyNameReplacements(form.text)
+  if (!textForRun.trim()) {
     ElMessage.warning(t('toast.textRequired'))
     return
   }
@@ -359,7 +505,7 @@ async function runGenerate() {
 
   try {
     const payload = {
-      text: form.text,
+      text: textForRun,
       characters: characters.value,
       segment_method: form.segment_method,
       sentences_per_segment: form.sentences_per_segment,
@@ -566,6 +712,38 @@ onUnmounted(() => {
         <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
         <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
       </div>
+
+      <div class="replace-toolbar">
+        <div class="switch-row">
+          <el-switch v-model="nameReplace.enabled" />
+          <span>启用名字替换字典</span>
+        </div>
+        <div class="actions">
+          <el-button @click="detectNameReplacementCandidates">检测高频词</el-button>
+          <el-button @click="clearNameReplacementEntries">清空字典</el-button>
+          <span class="muted" v-if="replacementEntries.length">
+            共 {{ replacementEntries.length }} 个候选，已启用 {{ replacementEnabledCount }} 个
+          </span>
+        </div>
+      </div>
+
+      <div v-if="replacementEntries.length" class="replace-list">
+        <div class="replace-item" v-for="entry in replacementEntries" :key="entry.word">
+          <el-checkbox v-model="entry.enabled" />
+          <span class="word">{{ entry.word }}</span>
+          <span class="muted">×{{ entry.count }}</span>
+          <span class="arrow">→</span>
+          <el-input v-model="entry.replacement" placeholder="替换成..." clearable />
+        </div>
+      </div>
+
+      <el-alert
+        v-if="hasReplacementEffect"
+        type="info"
+        show-icon
+        :closable="false"
+        title="名字替换已生效：分段/分析/生成都将使用替换后的文本"
+      />
 
       <el-alert
         v-if="segmentPreview.total_segments"

@@ -54,7 +54,7 @@ class SegmentTextRequest(BaseModel):
     text: str
     method: Literal["sentence", "fixed", "smart"] = "sentence"
     fixed_size: int = Field(default=120, ge=20, le=1000)
-    sentences_per_segment: int = Field(default=5, ge=1, le=50)
+    sentences_per_segment: int = Field(default=1, ge=1, le=50)
     model_id: str | None = None
 
 
@@ -74,7 +74,7 @@ class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
     segment_method: Literal["sentence", "fixed", "smart"] = "sentence"
-    sentences_per_segment: int = Field(default=5, ge=1, le=50)
+    sentences_per_segment: int = Field(default=1, ge=1, le=50)
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1080x1920"
     image_aspect_ratio: str | None = None

@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     image_model: str = Field(default="nano-banana", alias="IMAGE_MODEL")
 
     tts_api_url: str = Field(default="", alias="TTS_API_URL")
+    subtitle_font_path: str = Field(default="", alias="SUBTITLE_FONT_PATH")
 
     output_dir: str = Field(default="outputs", alias="OUTPUT_DIR")
     temp_dir: str = Field(default="outputs/temp", alias="TEMP_DIR")
