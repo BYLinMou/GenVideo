@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
+import shutil
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
@@ -16,11 +19,17 @@ from .logging_setup import setup_logging
 from .models import (
     AnalyzeCharactersRequest,
     AnalyzeCharactersResponse,
+    BgmLibraryItem,
+    BgmSelectRequest,
+    BgmStatusResponse,
+    BgmUploadResponse,
     CharacterImageItem,
     ConfirmCharactersRequest,
     CreateCharacterImageRequest,
     GenerateVideoRequest,
     GenerateVideoResponse,
+    RemixBgmRequest,
+    RemixBgmResponse,
     SegmentItem,
     SegmentTextRequest,
     SegmentTextResponse,
@@ -37,7 +46,7 @@ from .services.llm_service import (
     split_sentences,
 )
 from .services.model_service import get_models
-from .services.video_service import cancel_job, create_job
+from .services.video_service import _render_final_sync, cancel_job, create_job
 from .state import job_store
 from .voice_catalog import VOICE_INFOS
 
@@ -59,6 +68,7 @@ app.add_middleware(
 project_path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.temp_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.character_ref_dir).mkdir(parents=True, exist_ok=True)
+project_path("assets/bgm").mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_index_path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -68,6 +78,36 @@ app.mount(
     StaticFiles(directory=project_path(settings.character_ref_dir)),
     name="character_refs",
 )
+app.mount(
+    "/assets/bgm",
+    StaticFiles(directory=project_path("assets/bgm")),
+    name="bgm_assets",
+)
+
+
+def _bgm_root() -> Path:
+    root = project_path("assets/bgm")
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _bgm_current_path() -> Path:
+    return project_path("assets/bgm.mp3")
+
+
+def _current_bgm_source_filename() -> str | None:
+    current = _bgm_current_path()
+    if not current.exists():
+        return None
+
+    current_data = current.read_bytes()
+    for path in sorted(_bgm_root().glob("*.mp3")):
+        try:
+            if path.read_bytes() == current_data:
+                return path.name
+        except Exception:
+            continue
+    return None
 
 
 @app.exception_handler(Exception)
@@ -184,6 +224,104 @@ async def generate_character_reference_image(request: Request, payload: CreateCh
     return await create_character_reference_image(payload.character_name, payload.prompt, resolution, base_url)
 
 
+@app.post("/api/bgm/upload", response_model=BgmUploadResponse)
+async def upload_bgm(file: UploadFile = File(...)) -> BgmUploadResponse:
+    suffix = Path(file.filename or "bgm.mp3").suffix.lower()
+    if suffix != ".mp3":
+        raise HTTPException(status_code=400, detail="only .mp3 is supported")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty file")
+
+    bgm_root = _bgm_root()
+    stem = Path(file.filename or "bgm").stem.replace(" ", "_") or "bgm"
+    lib_path = bgm_root / f"{stem}_{uuid4().hex[:8]}.mp3"
+    lib_path.write_bytes(data)
+
+    bgm_path = _bgm_current_path()
+    bgm_path.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(lib_path, bgm_path)
+
+    return BgmUploadResponse(
+        status="ok",
+        path=lib_path.as_posix(),
+        filename=lib_path.name,
+        size=len(data),
+    )
+
+
+@app.get("/api/bgm/library")
+async def list_bgm_library(request: Request) -> dict:
+    base_url = str(request.base_url).rstrip("/")
+    items: list[BgmLibraryItem] = []
+    for path in sorted(_bgm_root().glob("*.mp3")):
+        stat = path.stat()
+        items.append(
+            BgmLibraryItem(
+                path=path.as_posix(),
+                url=f"{base_url}/assets/bgm/{quote(path.name)}",
+                filename=path.name,
+                size=int(stat.st_size),
+                updated_at=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+            )
+        )
+    return {"items": [item.model_dump() for item in items]}
+
+
+@app.post("/api/bgm/select", response_model=BgmStatusResponse)
+async def select_bgm(payload: BgmSelectRequest) -> BgmStatusResponse:
+    target = _bgm_root() / Path(payload.filename).name
+    if not target.exists() or target.suffix.lower() != ".mp3":
+        raise HTTPException(status_code=404, detail="bgm file not found")
+
+    current = _bgm_current_path()
+    current.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(target, current)
+
+    stat = current.stat()
+    return BgmStatusResponse(
+        exists=True,
+        path=current.as_posix(),
+        filename=current.name,
+        size=int(stat.st_size),
+        updated_at=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        source_filename=target.name,
+    )
+
+
+@app.delete("/api/bgm/current")
+async def delete_current_bgm() -> dict:
+    current = _bgm_current_path()
+    if current.exists():
+        current.unlink()
+    return {"status": "ok"}
+
+
+@app.get("/api/bgm", response_model=BgmStatusResponse)
+async def get_bgm_status() -> BgmStatusResponse:
+    bgm_path = _bgm_current_path()
+    if not bgm_path.exists():
+        return BgmStatusResponse(
+            exists=False,
+            path=bgm_path.as_posix(),
+            filename=bgm_path.name,
+            size=0,
+            updated_at=None,
+            source_filename=None,
+        )
+
+    stat = bgm_path.stat()
+    return BgmStatusResponse(
+        exists=True,
+        path=bgm_path.as_posix(),
+        filename=bgm_path.name,
+        size=int(stat.st_size),
+        updated_at=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),
+        source_filename=_current_bgm_source_filename(),
+    )
+
+
 @app.post("/api/generate-video", response_model=GenerateVideoResponse)
 async def generate_video(request: Request, payload: GenerateVideoRequest) -> GenerateVideoResponse:
     if not payload.text.strip():
@@ -191,6 +329,40 @@ async def generate_video(request: Request, payload: GenerateVideoRequest) -> Gen
     base_url = str(request.base_url).rstrip("/")
     job_id = create_job(payload=payload, base_url=base_url)
     return GenerateVideoResponse(job_id=job_id, status="queued")
+
+
+@app.post("/api/jobs/{job_id}/remix-bgm", response_model=RemixBgmResponse)
+async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> RemixBgmResponse:
+    status = job_store.get(job_id)
+    if not status:
+        raise HTTPException(status_code=404, detail="job not found")
+    if status.status != "completed" or not status.output_video_path:
+        raise HTTPException(status_code=409, detail="video not ready")
+
+    final_path = Path(status.output_video_path)
+    if not final_path.exists():
+        raise HTTPException(status_code=404, detail="video missing")
+
+    clip_root = project_path(settings.temp_dir) / job_id / "clips"
+    clip_paths = [str(item) for item in sorted(clip_root.glob("clip_*.mp4"))]
+    if not clip_paths:
+        raise HTTPException(status_code=404, detail="segment clips not found for remix")
+
+    await run_in_threadpool(
+        _render_final_sync,
+        clip_paths,
+        final_path,
+        payload.fps or 30,
+        payload.bgm_enabled,
+        payload.bgm_volume,
+    )
+
+    base_url = str(request.base_url).rstrip("/")
+    return RemixBgmResponse(
+        job_id=job_id,
+        status="completed",
+        output_video_url=f"{base_url}/api/jobs/{job_id}/video",
+    )
 
 
 @app.post("/api/jobs/{job_id}/cancel")

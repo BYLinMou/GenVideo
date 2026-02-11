@@ -23,6 +23,8 @@ const zhCN = {
     subtitleStyle: '字幕样式',
     cameraMotion: '镜头运动',
     fps: 'FPS',
+    bgmEnabled: '启用背景音乐（BGM）',
+    bgmVolume: '背景音乐音量',
     sceneReuse: '启用图片复用缓存',
     textInput: '小说文本',
     confidence: '识别置信度',
@@ -110,4 +112,3 @@ const zhCN = {
 }
 
 export default zhCN
-

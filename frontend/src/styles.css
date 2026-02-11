@@ -62,6 +62,15 @@ label {
   color: #344054;
 }
 
+.bgm-status {
+  margin-top: 8px;
+}
+
+.bgm-audio {
+  width: 100%;
+  margin-top: 6px;
+}
+
 .replace-toolbar {
   margin-top: 10px;
   padding: 10px;

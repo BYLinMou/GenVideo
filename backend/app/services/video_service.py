@@ -8,7 +8,7 @@ from threading import Thread
 from uuid import uuid4
 
 from fastapi.concurrency import run_in_threadpool
-from moviepy import AudioFileClip, CompositeVideoClip, ImageClip, TextClip, concatenate_videoclips
+from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, ImageClip, TextClip, afx, concatenate_videoclips
 
 from ..config import project_path, settings
 from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
@@ -300,18 +300,59 @@ def _render_clip_sync(
     image_clip.close()
 
 
-def _render_final_sync(clip_paths: list[str], output_path: Path, fps: int) -> None:
+def _render_final_sync(
+    clip_paths: list[str],
+    output_path: Path,
+    fps: int,
+    bgm_enabled: bool,
+    bgm_volume: float,
+) -> None:
     video_clips = []
+    bgm_clips = []
+    final = None
+    final_with_audio = None
     try:
         from moviepy import VideoFileClip
 
         for clip_path in clip_paths:
             video_clips.append(VideoFileClip(clip_path))
+
         final = concatenate_videoclips(video_clips, method="compose")
+
+        bgm_enabled = bool(bgm_enabled)
+        bgm_volume = max(0.0, min(float(bgm_volume), 1.0))
+        bgm_path = project_path("assets/bgm.mp3")
+        if bgm_enabled and bgm_volume > 0:
+            if bgm_path.exists():
+                final_duration = max(float(final.duration or 0.0), 0.0)
+                if final_duration > 0:
+                    bgm_source = AudioFileClip(str(bgm_path))
+                    bgm_loop = (
+                        bgm_source.with_effects([afx.AudioLoop(duration=final_duration)])
+                        .with_duration(final_duration)
+                        .with_volume_scaled(bgm_volume)
+                    )
+                    bgm_clips.extend([bgm_loop, bgm_source])
+
+                    if final.audio is not None:
+                        mixed_audio = CompositeAudioClip([final.audio, bgm_loop]).with_duration(final_duration)
+                        final_with_audio = final.with_audio(mixed_audio)
+                    else:
+                        final_with_audio = final.with_audio(bgm_loop)
+                    logger.info("BGM mixed into final video: path=%s volume=%.3f", bgm_path, bgm_volume)
+            else:
+                logger.warning("BGM file does not exist, skip mixing: %s", bgm_path)
+
+        final_output = final_with_audio or final
         output_path.parent.mkdir(parents=True, exist_ok=True)
-        final.write_videofile(str(output_path), fps=fps, audio_codec="aac", codec="libx264", logger=None)
-        final.close()
+        final_output.write_videofile(str(output_path), fps=fps, audio_codec="aac", codec="libx264", logger=None)
     finally:
+        if final_with_audio is not None:
+            final_with_audio.close()
+        if final is not None:
+            final.close()
+        for clip in bgm_clips:
+            clip.close()
         for clip in video_clips:
             clip.close()
 
@@ -495,7 +536,14 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         output_root = project_path(settings.output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
         final_path = output_root / f"{job_id}.mp4"
-        await run_in_threadpool(_render_final_sync, clip_paths, final_path, payload.fps)
+        await run_in_threadpool(
+            _render_final_sync,
+            clip_paths,
+            final_path,
+            payload.fps,
+            payload.bgm_enabled,
+            payload.bgm_volume,
+        )
 
         if job_store.is_cancelled(job_id):
             _update_job(

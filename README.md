@@ -7,6 +7,7 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - Segment-clip preview before final video
 - Sentence-based grouping semantics
 - Subtitle rendering with CJK font auto-detection
+- Optional looping BGM mixed in final compose (frontend-controlled)
 - Character reference-image library (select/upload/generate)
 - Per-character TTS voice selection from real voice list
 - Scene-image reuse cache with LLM text matching (cost reduction)
@@ -58,7 +59,10 @@ Default: `http://localhost:8000`
 - `GET /api/character-reference-images`
 - `POST /api/character-reference-images/upload`
 - `POST /api/character-reference-images/generate`
+- `POST /api/bgm/upload`
+- `GET /api/bgm`
 - `POST /api/generate-video`
+- `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
@@ -99,6 +103,15 @@ Subtitle font:
 
 - `SUBTITLE_FONT_PATH` (optional): explicit font file for subtitles
 - If empty, backend tries common CJK fonts automatically (e.g. `msyh.ttc` on Windows)
+
+BGM during final compose:
+
+- Controlled by frontend request fields: `bgm_enabled` and `bgm_volume`
+- Active BGM file: `assets/bgm.mp3`
+- BGM library folder: `assets/bgm`
+- You can upload BGM into library, select one as active, or delete current active BGM
+- BGM is looped to match final video duration and mixed at low volume
+- If BGM file is missing, compose will continue without BGM
 
 ## Notes
 

@@ -8,6 +8,7 @@ import { t } from './i18n'
 const models = ref([])
 const voices = ref([])
 const refImages = ref([])
+const bgmLibrary = ref([])
 const selectedModel = ref('')
 const modelFilterKeyword = ref('')
 
@@ -32,6 +33,8 @@ const form = reactive({
   subtitle_style: 'highlight',
   camera_motion: 'vertical',
   fps: 30,
+  bgm_enabled: true,
+  bgm_volume: 0.12,
   enable_scene_image_reuse: true
 })
 
@@ -56,6 +59,14 @@ const job = reactive({
   clipPreviewUrls: []
 })
 
+const bgmStatus = reactive({
+  exists: false,
+  filename: 'bgm.mp3',
+  size: 0,
+  updated_at: '',
+  source_filename: ''
+})
+
 let pollingTimer = null
 
 const effectiveSegmentGroups = computed(() => {
@@ -78,6 +89,10 @@ const filteredModels = computed(() => {
 const refPicker = reactive({
   visible: false,
   characterIndex: -1
+})
+
+const bgmPicker = reactive({
+  visible: false
 })
 
 const generatingRef = reactive({})
@@ -318,6 +333,14 @@ function closeRefPicker() {
   refPicker.characterIndex = -1
 }
 
+function openBgmPicker() {
+  bgmPicker.visible = true
+}
+
+function closeBgmPicker() {
+  bgmPicker.visible = false
+}
+
 function resolveRefImageUrl(image) {
   return image.url || api.getCharacterRefImageUrl(image.path)
 }
@@ -514,6 +537,8 @@ async function runGenerate() {
       subtitle_style: form.subtitle_style,
       camera_motion: form.camera_motion,
       fps: form.fps,
+      bgm_enabled: form.bgm_enabled,
+      bgm_volume: form.bgm_volume,
       model_id: selectedModel.value || null,
       enable_scene_image_reuse: form.enable_scene_image_reuse
     }
@@ -576,8 +601,103 @@ async function generateRefImage(character, index) {
   }
 }
 
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0)
+  if (!Number.isFinite(value) || value <= 0) return '0 B'
+  if (value < 1024) return `${value} B`
+  const kb = value / 1024
+  if (kb < 1024) return `${kb.toFixed(1)} KB`
+  const mb = kb / 1024
+  return `${mb.toFixed(2)} MB`
+}
+
+async function loadBgmStatus() {
+  try {
+    const data = await api.getBgmStatus()
+    bgmStatus.exists = Boolean(data.exists)
+    bgmStatus.filename = data.filename || 'bgm.mp3'
+    bgmStatus.size = Number(data.size || 0)
+    bgmStatus.updated_at = data.updated_at || ''
+    bgmStatus.source_filename = data.source_filename || ''
+  } catch {
+    bgmStatus.exists = false
+    bgmStatus.filename = 'bgm.mp3'
+    bgmStatus.size = 0
+    bgmStatus.updated_at = ''
+    bgmStatus.source_filename = ''
+  }
+}
+
+async function loadBgmLibrary() {
+  try {
+    const data = await api.listBgmLibrary()
+    bgmLibrary.value = data.items || []
+  } catch {
+    bgmLibrary.value = []
+  }
+}
+
+async function uploadBgmFile(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    await api.uploadBgm(file)
+    ElMessage.success('BGM 上传成功')
+    await loadBgmLibrary()
+    await loadBgmStatus()
+  } catch (error) {
+    ElMessage.error(`BGM 上传失败：${error.message}`)
+  } finally {
+    event.target.value = ''
+  }
+}
+
+async function pickBgm(item) {
+  try {
+    await api.selectBgm(item.filename)
+    ElMessage.success('已切换当前BGM')
+    await loadBgmStatus()
+    closeBgmPicker()
+  } catch (error) {
+    ElMessage.error(`切换BGM失败：${error.message}`)
+  }
+}
+
+async function deleteCurrentBgm() {
+  try {
+    await api.deleteCurrentBgm()
+    ElMessage.success('已删除当前BGM')
+    await loadBgmStatus()
+  } catch (error) {
+    ElMessage.error(`删除当前BGM失败：${error.message}`)
+  }
+}
+
+async function remixCurrentVideoBgm() {
+  if (!job.id) {
+    ElMessage.warning('请先生成至少一次视频')
+    return
+  }
+  try {
+    loading.generate = true
+    await api.remixBgm(job.id, {
+      bgm_enabled: form.bgm_enabled,
+      bgm_volume: form.bgm_volume,
+      fps: form.fps
+    })
+    job.videoUrl = `${api.getVideoUrl(job.id)}?t=${Date.now()}`
+    ElMessage.success('已完成仅替换BGM（无需重跑全流程）')
+  } catch (error) {
+    ElMessage.error(`仅替换BGM失败：${error.message}`)
+  } finally {
+    loading.generate = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
+  await loadBgmLibrary()
+  await loadBgmStatus()
 })
 
 onUnmounted(() => {
@@ -697,11 +817,43 @@ onUnmounted(() => {
           <label>{{ t('field.fps') }}</label>
           <el-input-number v-model="form.fps" :min="15" :max="60" />
         </div>
+
+        <div>
+          <label>背景音乐音量</label>
+          <el-slider
+            v-model="form.bgm_volume"
+            :min="0"
+            :max="0.5"
+            :step="0.01"
+            :disabled="!form.bgm_enabled"
+            show-input
+            :show-input-controls="false"
+            input-size="small"
+          />
+        </div>
       </div>
 
       <div class="switch-row">
         <el-switch v-model="form.enable_scene_image_reuse" />
         <span>{{ t('field.sceneReuse') }}</span>
+      </div>
+      <div class="switch-row">
+        <el-switch v-model="form.bgm_enabled" />
+        <span>启用背景音乐（BGM）</span>
+        <label class="upload-btn">
+          <input type="file" accept=".mp3,audio/mpeg" @change="uploadBgmFile" />
+          上传BGM
+        </label>
+        <el-button @click="openBgmPicker">从BGM库选择</el-button>
+        <el-button type="danger" plain @click="deleteCurrentBgm">删除当前BGM</el-button>
+      </div>
+      <div class="muted bgm-status">
+        <span v-if="bgmStatus.exists">
+          当前BGM：{{ bgmStatus.filename }} ｜ {{ formatFileSize(bgmStatus.size) }}
+          <span v-if="bgmStatus.source_filename"> ｜ 来源：{{ bgmStatus.source_filename }}</span>
+          <span v-if="bgmStatus.updated_at"> ｜ 更新时间：{{ bgmStatus.updated_at }}</span>
+        </span>
+        <span v-else>当前BGM：未上传（默认读取 assets/bgm.mp3）</span>
       </div>
     </section>
 
@@ -846,6 +998,7 @@ onUnmounted(() => {
       <h2>{{ t('section.render') }}</h2>
       <div class="actions">
         <el-button type="primary" :loading="loading.generate" @click="runGenerate">{{ t('action.generateVideo') }}</el-button>
+        <el-button :loading="loading.generate" :disabled="!job.id" @click="remixCurrentVideoBgm">仅替换BGM（最后一步）</el-button>
         <el-button :disabled="!job.id" type="danger" @click="cancelCurrentJob">{{ t('action.cancelJob') }}</el-button>
       </div>
 
@@ -894,6 +1047,20 @@ onUnmounted(() => {
       <el-empty v-else :description="t('hint.noRefImage')" />
       <template #footer>
         <el-button @click="closeRefPicker">{{ t('action.close') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="bgmPicker.visible" title="BGM音乐库" width="820px" :close-on-click-modal="false" @closed="closeBgmPicker">
+      <div class="ref-library-modal" v-if="bgmLibrary.length">
+        <div v-for="item in bgmLibrary" :key="item.path" class="ref-option" @click="pickBgm(item)">
+          <div class="filename">{{ item.filename }}</div>
+          <div class="muted">{{ formatFileSize(item.size) }}</div>
+          <audio :src="item.url" controls preload="none" class="bgm-audio" @click.stop></audio>
+        </div>
+      </div>
+      <el-empty v-else description="暂无BGM，请先上传" />
+      <template #footer>
+        <el-button @click="closeBgmPicker">关闭</el-button>
       </template>
     </el-dialog>
   </div>

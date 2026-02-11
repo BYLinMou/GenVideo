@@ -81,6 +81,8 @@ class GenerateVideoRequest(BaseModel):
     subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
+    bgm_enabled: bool = True
+    bgm_volume: float = Field(default=0.12, ge=0.0, le=1.0)
     model_id: str | None = None
     enable_scene_image_reuse: bool = True
 
@@ -88,6 +90,18 @@ class GenerateVideoRequest(BaseModel):
 class GenerateVideoResponse(BaseModel):
     job_id: str
     status: str
+
+
+class RemixBgmRequest(BaseModel):
+    bgm_enabled: bool = True
+    bgm_volume: float = Field(default=0.12, ge=0.0, le=1.0)
+    fps: int | None = Field(default=None, ge=15, le=60)
+
+
+class RemixBgmResponse(BaseModel):
+    job_id: str
+    status: str
+    output_video_url: str
 
 
 class JobStatus(BaseModel):
@@ -112,5 +126,33 @@ class CreateCharacterImageRequest(BaseModel):
 class CharacterImageItem(BaseModel):
     path: str
     url: str
+    filename: str
+
+
+class BgmUploadResponse(BaseModel):
+    status: str
+    path: str
+    filename: str
+    size: int
+
+
+class BgmStatusResponse(BaseModel):
+    exists: bool
+    path: str
+    filename: str
+    size: int
+    updated_at: str | None = None
+    source_filename: str | None = None
+
+
+class BgmLibraryItem(BaseModel):
+    path: str
+    url: str
+    filename: str
+    size: int
+    updated_at: str | None = None
+
+
+class BgmSelectRequest(BaseModel):
     filename: str
 

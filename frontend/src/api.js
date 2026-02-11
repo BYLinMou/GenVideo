@@ -45,6 +45,18 @@ export const api = {
   getLogs(lines = 200) {
     return request(`/api/logs/tail?lines=${lines}`)
   },
+  getBgmStatus() {
+    return request('/api/bgm')
+  },
+  listBgmLibrary() {
+    return request('/api/bgm/library')
+  },
+  selectBgm(filename) {
+    return jsonRequest('/api/bgm/select', 'POST', { filename })
+  },
+  deleteCurrentBgm() {
+    return request('/api/bgm/current', { method: 'DELETE' })
+  },
   analyzeCharacters(payload) {
     return jsonRequest('/api/analyze-characters', 'POST', payload)
   },
@@ -56,6 +68,9 @@ export const api = {
   },
   generateVideo(payload) {
     return jsonRequest('/api/generate-video', 'POST', payload)
+  },
+  remixBgm(jobId, payload) {
+    return jsonRequest(`/api/jobs/${jobId}/remix-bgm`, 'POST', payload)
   },
   cancelJob(jobId) {
     return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
@@ -76,6 +91,14 @@ export const api = {
     const form = new FormData()
     form.append('file', file)
     return request('/api/character-reference-images/upload', {
+      method: 'POST',
+      body: form
+    })
+  },
+  async uploadBgm(file) {
+    const form = new FormData()
+    form.append('file', file)
+    return request('/api/bgm/upload', {
       method: 'POST',
       body: form
     })
