@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
@@ -165,7 +166,7 @@ async def upload_character_reference_image(request: Request, file: UploadFile = 
 
     return CharacterImageItem(
         path=dest.as_posix(),
-        url=f"{base_url}/assets/character_refs/{dest.name}",
+        url=f"{base_url}/assets/character_refs/{quote(dest.name)}",
         filename=dest.name,
     )
 

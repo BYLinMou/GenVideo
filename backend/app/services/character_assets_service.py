@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 from uuid import uuid4
 
 from ..config import project_path, settings
@@ -20,10 +21,11 @@ def list_character_reference_images(base_url: str) -> list[CharacterImageItem]:
         if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
             continue
         rel = path.as_posix()
+        encoded_name = quote(path.name)
         result.append(
             CharacterImageItem(
                 path=rel,
-                url=f"{base_url}/assets/character_refs/{path.name}",
+                url=f"{base_url}/assets/character_refs/{encoded_name}",
                 filename=path.name,
             )
         )
@@ -45,8 +47,9 @@ async def create_character_reference_image(
     await generate_image(prompt=prompt, output_path=output_path, resolution=resolution)
 
     rel = output_path.as_posix()
+    encoded_name = quote(filename)
     return CharacterImageItem(
         path=rel,
-        url=f"{base_url}/assets/character_refs/{filename}",
+        url=f"{base_url}/assets/character_refs/{encoded_name}",
         filename=filename,
     )

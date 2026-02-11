@@ -61,6 +61,13 @@ const effectiveSegmentGroups = computed(() => {
   return segmentPreview.total_segments
 })
 
+const refPicker = reactive({
+  visible: false,
+  characterIndex: -1
+})
+
+const generatingRef = reactive({})
+
 function resetJob() {
   job.id = ''
   job.status = ''
@@ -69,6 +76,29 @@ function resetJob() {
   job.message = ''
   job.videoUrl = ''
   job.clipPreviewUrls = []
+}
+
+function openRefPicker(index) {
+  refPicker.characterIndex = index
+  refPicker.visible = true
+}
+
+function closeRefPicker() {
+  refPicker.visible = false
+  refPicker.characterIndex = -1
+}
+
+function pickRefImage(image) {
+  const target = characters.value[refPicker.characterIndex]
+  if (!target) return
+  target.reference_image_path = image.path
+  target.reference_image_url = resolveRefImageUrl(image)
+  closeRefPicker()
+}
+
+function clearRefImage(character) {
+  character.reference_image_path = ''
+  character.reference_image_url = ''
 }
 
 async function loadModels() {
@@ -270,7 +300,7 @@ async function uploadRefImage(event, character) {
   try {
     const created = await api.uploadCharacterRefImage(file)
     character.reference_image_path = created.path
-    character.reference_image_url = created.url
+    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
     await loadRefImages()
     ElMessage.success('参考图上传成功')
   } catch (error) {
@@ -278,7 +308,8 @@ async function uploadRefImage(event, character) {
   }
 }
 
-async function generateRefImage(character) {
+async function generateRefImage(character, index) {
+  generatingRef[index] = true
   try {
     const created = await api.generateCharacterRefImage({
       character_name: character.name || 'character',
@@ -286,17 +317,28 @@ async function generateRefImage(character) {
       resolution: '768x768'
     })
     character.reference_image_path = created.path
-    character.reference_image_url = created.url
+    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
     await loadRefImages()
     ElMessage.success('参考图生成成功')
   } catch (error) {
     ElMessage.error(`生成失败：${error.message}`)
+  } finally {
+    generatingRef[index] = false
   }
 }
 
 function bindRefImage(character, path) {
+  if (!path) {
+    clearRefImage(character)
+    return
+  }
+  const found = refImages.value.find((item) => item.path === path)
   character.reference_image_path = path
-  character.reference_image_url = api.getCharacterRefImageUrl(path)
+  character.reference_image_url = found ? resolveRefImageUrl(found) : api.getCharacterRefImageUrl(path)
+}
+
+function resolveRefImageUrl(image) {
+  return image.url || api.getCharacterRefImageUrl(image.path)
 }
 
 onMounted(async () => {
@@ -316,7 +358,16 @@ onMounted(async () => {
       <div class="grid">
         <div>
           <label>模型</label>
-          <el-select v-model="selectedModel" style="width: 100%">
+          <el-select
+            v-model="selectedModel"
+            style="width: 100%"
+            filterable
+            clearable
+            reserve-keyword
+            default-first-option
+            placeholder="输入模型名进行搜索"
+            no-match-text="无匹配模型"
+          >
             <el-option
               v-for="item in models"
               :key="item.id"
@@ -427,15 +478,13 @@ onMounted(async () => {
           </div>
           <div>
             <label>参考图</label>
-            <el-select
-              :model-value="character.reference_image_path || ''"
-              style="width: 100%"
-              placeholder="选择已有参考图"
-              @change="(value) => bindRefImage(character, value)"
-            >
-              <el-option label="不使用参考图" value="" />
-              <el-option v-for="image in refImages" :key="image.path" :label="image.filename" :value="image.path" />
-            </el-select>
+            <div class="ref-inline-actions">
+              <el-button @click="openRefPicker(index)">选择参考图</el-button>
+              <el-button @click="clearRefImage(character)">清除</el-button>
+            </div>
+            <p class="muted" v-if="character.reference_image_path">
+              当前：{{ character.reference_image_path.split('/').pop() }}
+            </p>
           </div>
         </div>
         <div class="grid">
@@ -457,7 +506,7 @@ onMounted(async () => {
             <input type="file" accept="image/*" @change="(event) => uploadRefImage(event, character)" />
             上传参考图
           </label>
-          <el-button @click="generateRefImage(character)">生成角色参考图</el-button>
+          <el-button :loading="!!generatingRef[index]" @click="generateRefImage(character, index)">生成角色参考图</el-button>
         </div>
         <img v-if="character.reference_image_url" :src="character.reference_image_url" class="ref-thumb" alt="reference" />
       </div>
@@ -501,6 +550,24 @@ onMounted(async () => {
       </div>
       <pre class="logs">{{ backendLogs.join('\n') }}</pre>
     </section>
+
+    <el-dialog
+      v-model="refPicker.visible"
+      title="选择角色参考图"
+      width="820px"
+      :close-on-click-modal="false"
+      @closed="closeRefPicker"
+    >
+      <div class="ref-library-modal" v-if="refImages.length">
+        <div v-for="image in refImages" :key="image.path" class="ref-option" @click="pickRefImage(image)">
+          <img :src="resolveRefImageUrl(image)" alt="ref" />
+          <div class="filename">{{ image.filename }}</div>
+        </div>
+      </div>
+      <el-empty v-else description="暂无参考图，请先上传或生成" />
+      <template #footer>
+        <el-button @click="closeRefPicker">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
-

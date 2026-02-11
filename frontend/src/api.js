@@ -86,7 +86,6 @@ export const api = {
   getCharacterRefImageUrl(path) {
     const normalized = path.replaceAll('\\', '/')
     const filename = normalized.split('/').pop()
-    return `${BASE}/assets/character_refs/${filename}`
+    return `${BASE}/assets/character_refs/${encodeURIComponent(filename)}`
   }
 }
-
