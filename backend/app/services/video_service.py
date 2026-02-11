@@ -4,6 +4,7 @@ import asyncio
 import logging
 import re
 from pathlib import Path
+from collections import deque
 from threading import Thread
 from uuid import uuid4
 
@@ -430,11 +431,16 @@ async def _resolve_segment_image(
     prompt: str,
     image_path: Path,
     resolution: tuple[int, int],
-) -> tuple[Path, str]:
+    recent_reuse_entry_ids: set[str] | None = None,
+) -> tuple[Path, str, str | None]:
     descriptor = build_scene_descriptor(character=character, segment_text=segment_text, prompt=prompt)
 
     if payload.enable_scene_image_reuse:
-        matched = await find_reusable_scene_image(scene_descriptor=descriptor, model_id=payload.model_id)
+        matched = await find_reusable_scene_image(
+            scene_descriptor=descriptor,
+            model_id=payload.model_id,
+            disallow_entry_ids=recent_reuse_entry_ids,
+        )
         if matched and matched.get("image_path"):
             reused = await run_in_threadpool(
                 render_cached_image_to_output,
@@ -448,7 +454,7 @@ async def _resolve_segment_image(
                 float(matched.get("confidence") or 0.0),
                 matched.get("reason") or "",
             )
-            return reused, "cache"
+            return reused, "cache", str(matched.get("entry_id") or "") or None
 
     generated = await use_reference_or_generate(
         prompt=prompt,
@@ -458,13 +464,15 @@ async def _resolve_segment_image(
         aspect_ratio=payload.image_aspect_ratio,
     )
 
+    cache_entry_id: str | None = None
     if payload.enable_scene_image_reuse:
         try:
-            await run_in_threadpool(save_scene_image_cache_entry, descriptor, generated, prompt)
+            saved_entry = await run_in_threadpool(save_scene_image_cache_entry, descriptor, generated, prompt)
+            cache_entry_id = str((saved_entry or {}).get("id") or "") or None
         except Exception:
             logger.exception("Failed to persist generated image into scene cache")
 
-    return generated, "generated"
+    return generated, "generated", cache_entry_id
 
 
 async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: str) -> None:
@@ -486,6 +494,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         resolution = _parse_resolution(payload.resolution)
         clip_paths: list[str] = []
         total = len(segments)
+        no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
+        lookback_scenes = no_repeat_window
+        recent_scene_entry_ids = deque(maxlen=lookback_scenes if lookback_scenes > 0 else None)
 
         for index, segment_text in enumerate(segments):
             if job_store.is_cancelled(job_id):
@@ -530,11 +541,16 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     prompt=prompt,
                     image_path=image_path,
                     resolution=resolution,
+                    recent_reuse_entry_ids=set(recent_scene_entry_ids),
                 )
             )
 
             image_bundle, audio_bundle = await asyncio.gather(image_task, audio_task)
-            image_result, image_source = image_bundle
+            image_result, image_source, reused_entry_id = image_bundle
+
+            if lookback_scenes > 0 and reused_entry_id:
+                recent_scene_entry_ids.append(str(reused_entry_id))
+
             audio_result_path, duration = audio_bundle
             logger.info("Segment %s image source: %s", index + 1, image_source)
 

@@ -111,6 +111,7 @@ async def generate_image(
                     seen_content = True
                     maybe_url = _extract_first_url(content)
                     if maybe_url:
+                        logger.info("Image stream URL candidate: %s", maybe_url[:500])
                         image_url = maybe_url
 
             if not image_url:
@@ -120,7 +121,7 @@ async def generate_image(
             image_response = await client.get(image_url)
             image_response.raise_for_status()
             img = Image.open(BytesIO(image_response.content)).convert("RGB")
-            img = img.resize(resolution)
+            logger.info("Image upstream size=%sx%s, target frame=%sx%s", img.width, img.height, resolution[0], resolution[1])
             img.save(output_path)
             return output_path
 
@@ -168,7 +169,7 @@ async def use_reference_or_generate(
             ref = Path(reference_image_path)
             if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
                 output_path.parent.mkdir(parents=True, exist_ok=True)
-                img = Image.open(ref).convert("RGB").resize(resolution)
+                img = Image.open(ref).convert("RGB")
                 img.save(output_path)
                 return output_path
         return await _placeholder_image(prompt, output_path, resolution)

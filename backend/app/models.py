@@ -104,6 +104,7 @@ class GenerateVideoRequest(BaseModel):
     bgm_volume: float = Field(default=0.12, ge=0.0, le=1.0)
     model_id: str | None = None
     enable_scene_image_reuse: bool = True
+    scene_reuse_no_repeat_window: int = Field(default=3, ge=0, le=100)
 
 
 class GenerateVideoResponse(BaseModel):

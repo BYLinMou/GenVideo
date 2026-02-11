@@ -53,6 +53,24 @@
         "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/林昭_5d69a62b.png",
         "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。"
       }
+    },
+    {
+      "id": "9b798feacfa34be18a17312a4263d9f8",
+      "created_at": "2026-02-11T09:16:33.769898+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_091633_7d75803b.png",
+      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.; Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.. Character personality and vibe: Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.. Current plot segment: 书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。. Scene/background/action must follow current plot segment. Additional style and composition details: Chinese style, deep night in a dimly lit old alley of South City, foggy shadows, Luo Yan—a thin young man in a black coat with hood pulled low, sleeves concealing a clenched fruit knife, black dilated eyes a",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "Protagonist – a transplanted “诡异” (monster) struggling to survive in a modern city.",
+        "character_appearance": "Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.",
+        "character_personality": "Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.",
+        "character_prompt": "Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.",
+        "action_hint": "书名：混穿诡异",
+        "location_hint": "踉跄地走在旧巷之中",
+        "segment_text": "书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.; Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.. Character personality and vibe: Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.. Current plot segment: 书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。. Scene/b"
+      }
     }
   ]
 }

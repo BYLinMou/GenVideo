@@ -17,8 +17,35 @@ _VOICE_ID_SET = {item.id for item in VOICE_INFOS}
 _VOICE_NAME_TO_ID = {item.name.lower(): item.id for item in VOICE_INFOS}
 
 
+class LLMServiceError(RuntimeError):
+    pass
+
+
 def _base_url(path: str) -> str:
     return f"{settings.llm_api_base_url.rstrip('/')}{path}"
+
+
+def _response_error_message(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+        if isinstance(payload, dict):
+            error = payload.get("error")
+            if isinstance(error, dict):
+                for key in ("message", "detail", "type"):
+                    value = error.get(key)
+                    if value:
+                        return str(value)
+            if error:
+                return str(error)
+            for key in ("detail", "message"):
+                value = payload.get(key)
+                if value:
+                    return str(value)
+    except Exception:
+        pass
+
+    text = (response.text or "").strip()
+    return text[:300] if text else "unknown upstream error"
 
 
 async def probe_openai_models() -> list[str]:
@@ -335,6 +362,24 @@ def _character_prompt(text: str, depth: str) -> str:
     voice_lines = "\n".join(
         f"- {voice.id} | {voice.name} | {voice.gender}/{voice.age} | {voice.description}" for voice in VOICE_INFOS
     )
+    allowed_ids = ", ".join(sorted(_VOICE_ID_SET))
+    return (
+        "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
+        f"{detail}. "
+        "voice_id must be selected strictly from the allowed voice IDs below. "
+        "Do not invent any new voice name or ID. "
+        "If unsure, choose the closest one from the list. "
+        "JSON schema: "
+        "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
+        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
+        "\"confidence\":0.0}"
+        "\n\nAllowed voice IDs: "
+        f"{allowed_ids}"
+        "\nVoice catalog:"
+        f"\n{voice_lines}"
+        "\n\nText:\n"
+        f"{text[:14000]}"
+    )
 
 
 _ALIAS_STOPWORDS = {
@@ -448,7 +493,7 @@ async def generate_novel_aliases(text: str, count: int, model_id: str | None) ->
         return result
 
     if not settings.llm_api_key:
-        return _fallback_aliases(text, wanted), selected_model
+        raise LLMServiceError("LLM API key is missing")
 
     payload = {
         "model": selected_model,
@@ -466,7 +511,9 @@ async def generate_novel_aliases(text: str, count: int, model_id: str | None) ->
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(_base_url("/chat/completions"), headers=headers, json=payload)
-            response.raise_for_status()
+            if response.status_code >= 400:
+                detail = _response_error_message(response)
+                raise LLMServiceError(f"LLM alias generation failed ({response.status_code}): {detail}")
             body = response.json()
             content = body["choices"][0]["message"]["content"]
             parsed = _extract_json_object(content) or {}
@@ -476,30 +523,15 @@ async def generate_novel_aliases(text: str, count: int, model_id: str | None) ->
 
             normalized = _dedupe([str(item) for item in aliases])
             if len(normalized) < wanted:
-                fallback = _fallback_aliases(text, wanted * 2)
-                normalized = _dedupe(normalized + fallback)
+                raise LLMServiceError(
+                    f"LLM alias generation returned insufficient valid aliases ({len(normalized)}/{wanted})"
+                )
             return normalized[:wanted], selected_model
-    except Exception:
-        logger.exception("Generate novel aliases failed, fallback to local")
-        return _fallback_aliases(text, wanted), selected_model
-    allowed_ids = ", ".join(sorted(_VOICE_ID_SET))
-    return (
-        "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
-        f"{detail}. "
-        "voice_id must be selected strictly from the allowed voice IDs below. "
-        "Do not invent any new voice name or ID. "
-        "If unsure, choose the closest one from the list. "
-        "JSON schema: "
-        "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
-        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
-        "\"confidence\":0.0}"
-        "\n\nAllowed voice IDs: "
-        f"{allowed_ids}"
-        "\nVoice catalog:"
-        f"\n{voice_lines}"
-        "\n\nText:\n"
-        f"{text[:14000]}"
-    )
+    except LLMServiceError:
+        raise
+    except Exception as exc:
+        logger.exception("Generate novel aliases failed")
+        raise LLMServiceError(f"LLM alias generation failed: {exc}") from exc
 
 
 def _normalize_voice_id(raw_voice: str | None, role: str, personality: str) -> str:
@@ -526,7 +558,7 @@ def _normalize_voice_id(raw_voice: str | None, role: str, personality: str) -> s
 async def analyze_characters(text: str, depth: str, model_id: str | None) -> tuple[list[CharacterSuggestion], float, str]:
     selected_model = model_id or settings.llm_default_model
     if not settings.llm_api_key:
-        return _fallback_character_analysis(text), 0.45, selected_model
+        raise LLMServiceError("LLM API key is missing")
 
     payload = {
         "model": selected_model,
@@ -544,12 +576,14 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
     try:
         async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(_base_url("/chat/completions"), headers=headers, json=payload)
-            response.raise_for_status()
+            if response.status_code >= 400:
+                detail = _response_error_message(response)
+                raise LLMServiceError(f"LLM character analysis failed ({response.status_code}): {detail}")
             body = response.json()
             content = body["choices"][0]["message"]["content"]
             parsed = _extract_json_object(content)
             if not parsed:
-                raise ValueError("LLM returned unparseable JSON")
+                raise LLMServiceError("LLM returned unparseable JSON")
 
             raw_items = parsed.get("characters") or []
             confidence = float(parsed.get("confidence", 0.75))
@@ -572,8 +606,10 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
                 )
 
             if not characters:
-                raise ValueError("Empty characters from LLM")
+                raise LLMServiceError("LLM returned empty characters")
             return characters, max(0.0, min(1.0, confidence)), selected_model
-    except Exception:
-        logger.exception("Analyze characters failed, fallback to local extractor")
-        return _fallback_character_analysis(text), 0.5, selected_model
+    except LLMServiceError:
+        raise
+    except Exception as exc:
+        logger.exception("Analyze characters failed")
+        raise LLMServiceError(f"LLM character analysis failed: {exc}") from exc

@@ -41,6 +41,7 @@ from .services.character_assets_service import (
     list_character_reference_images,
 )
 from .services.llm_service import (
+    LLMServiceError,
     analyze_characters,
     generate_novel_aliases,
     group_sentences,
@@ -159,8 +160,11 @@ async def list_voices() -> dict:
 async def analyze_characters_api(payload: AnalyzeCharactersRequest) -> AnalyzeCharactersResponse:
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-    characters, confidence, model_used = await analyze_characters(payload.text, payload.analysis_depth, payload.model_id)
-    return AnalyzeCharactersResponse(characters=characters, confidence=confidence, model_used=model_used)
+    try:
+        characters, confidence, model_used = await analyze_characters(payload.text, payload.analysis_depth, payload.model_id)
+        return AnalyzeCharactersResponse(characters=characters, confidence=confidence, model_used=model_used)
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/generate-novel-aliases", response_model=GenerateNovelAliasesResponse)
@@ -168,8 +172,11 @@ async def generate_novel_aliases_api(payload: GenerateNovelAliasesRequest) -> Ge
     text = payload.text.strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    aliases, model_used = await generate_novel_aliases(text=text, count=payload.count, model_id=payload.model_id)
-    return GenerateNovelAliasesResponse(aliases=aliases, model_used=model_used)
+    try:
+        aliases, model_used = await generate_novel_aliases(text=text, count=payload.count, model_id=payload.model_id)
+        return GenerateNovelAliasesResponse(aliases=aliases, model_used=model_used)
+    except LLMServiceError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/confirm-characters")

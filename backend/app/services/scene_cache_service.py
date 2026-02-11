@@ -239,8 +239,11 @@ async def _llm_match_candidate(
 async def find_reusable_scene_image(
     scene_descriptor: dict,
     model_id: str | None = None,
+    disallow_entry_ids: set[str] | None = None,
 ) -> dict | None:
     ensure_scene_cache_paths()
+
+    blocked_ids = {str(item) for item in (disallow_entry_ids or set()) if str(item)}
 
     with _CACHE_LOCK:
         payload = _load_index_unlocked()
@@ -248,6 +251,9 @@ async def find_reusable_scene_image(
 
     viable: list[dict] = []
     for entry in entries:
+        entry_id = str(entry.get("id") or "")
+        if entry_id and entry_id in blocked_ids:
+            continue
         image_path = Path(entry.get("image_path") or "")
         if not image_path.exists():
             continue
@@ -340,6 +346,5 @@ def render_cached_image_to_output(
     dst.parent.mkdir(parents=True, exist_ok=True)
 
     image = Image.open(src).convert("RGB")
-    image = image.resize(resolution)
     image.save(dst)
     return dst

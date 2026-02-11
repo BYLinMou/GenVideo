@@ -36,7 +36,8 @@ const form = reactive({
   fps: 30,
   bgm_enabled: true,
   bgm_volume: 0.12,
-  enable_scene_image_reuse: true
+  enable_scene_image_reuse: true,
+  scene_reuse_no_repeat_window: 3
 })
 
 const characters = ref([])
@@ -610,6 +611,7 @@ async function runGenerate() {
       model_id: selectedModel.value || null,
       enable_scene_image_reuse: form.enable_scene_image_reuse
     }
+    payload.scene_reuse_no_repeat_window = form.scene_reuse_no_repeat_window
     if (form.image_aspect_ratio) {
       payload.image_aspect_ratio = form.image_aspect_ratio
     }
@@ -958,6 +960,13 @@ onUnmounted(() => {
       <div class="switch-row">
         <el-switch v-model="form.enable_scene_image_reuse" />
         <span>{{ t('field.sceneReuse') }}</span>
+        <span>{{ t('field.sceneReuseNoRepeatWindow') }}</span>
+        <el-input-number
+          v-model="form.scene_reuse_no_repeat_window"
+          :min="0"
+          :max="100"
+          :disabled="!form.enable_scene_image_reuse"
+        />
       </div>
       <div class="switch-row">
         <el-switch v-model="form.bgm_enabled" />

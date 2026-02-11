@@ -26,6 +26,7 @@ const zhCN = {
     bgmEnabled: '启用背景音乐（BGM）',
     bgmVolume: '背景音乐音量',
     sceneReuse: '启用图片复用缓存',
+    sceneReuseNoRepeatWindow: '复用去重窗口（前N段）',
     textInput: '小说文本',
     confidence: '识别置信度',
     roleName: '角色名称',
