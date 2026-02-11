@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import logging
 import re
 from io import BytesIO
 from pathlib import Path
@@ -10,6 +11,9 @@ import httpx
 from PIL import Image, ImageDraw, ImageFont
 
 from ..config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 def _extract_first_url(text: str) -> str | None:
@@ -31,6 +35,7 @@ async def _placeholder_image(prompt: str, output_path: Path, size: tuple[int, in
     wrapped = prompt[:180]
     draw.text((50, 130), wrapped, fill=(170, 180, 200), font=font)
     img.save(output_path)
+    logger.warning("Using placeholder image for prompt: %s", prompt[:120])
     return output_path
 
 
@@ -74,10 +79,11 @@ async def generate_image(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    async def _remote_generate() -> Path:
+    async def _remote_generate(req_payload: dict) -> Path:
         image_url: str | None = None
+        seen_content = False
         async with httpx.AsyncClient(timeout=120) as client:
-            async with client.stream("POST", url, headers=headers, json=payload) as response:
+            async with client.stream("POST", url, headers=headers, json=req_payload) as response:
                 response.raise_for_status()
                 async for line in response.aiter_lines():
                     if not line:
@@ -99,12 +105,14 @@ async def generate_image(
                     content = delta.get("content")
                     if not content:
                         continue
+                    seen_content = True
                     maybe_url = _extract_first_url(content)
                     if maybe_url:
                         image_url = maybe_url
 
             if not image_url:
-                return await _placeholder_image(prompt, output_path, resolution)
+                detail = "no content" if not seen_content else "content without image url"
+                raise RuntimeError(f"image stream finished but {detail}")
 
             image_response = await client.get(image_url)
             image_response.raise_for_status()
@@ -114,8 +122,23 @@ async def generate_image(
             return output_path
 
     try:
-        return await asyncio.wait_for(_remote_generate(), timeout=45)
-    except Exception:
+        return await asyncio.wait_for(_remote_generate(payload), timeout=45)
+    except Exception as first_error:
+        logger.warning("Primary image generation failed: %s", first_error)
+        # 某些代理对纯中文提示词会返回 200 但不给图，进行英文包装重试
+        retry_prompt = (
+            "Create one single image only. Do not explain. "
+            f"Anime-style illustration based on this description: {prompt}"
+        )
+        retry_payload = {
+            "model": settings.image_model,
+            "messages": _build_messages(retry_prompt, reference_image_path=reference_image_path),
+            "stream": True,
+        }
+        try:
+            return await asyncio.wait_for(_remote_generate(retry_payload), timeout=45)
+        except Exception as retry_error:
+            logger.exception("Retry image generation failed: %s", retry_error)
         return await _placeholder_image(prompt, output_path, resolution)
 
 

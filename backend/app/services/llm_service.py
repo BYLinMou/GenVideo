@@ -59,8 +59,37 @@ def split_sentences(text: str) -> list[str]:
     clean = re.sub(r"\s+", " ", text.strip())
     if not clean:
         return []
-    parts = re.split(r"(?<=[。！？!?；;，,])", clean)
-    return [part.strip() for part in parts if part.strip()]
+
+    delimiters = {"。", "！", "？", "；", "，", ";", ",", "!", "?"}
+    sentences: list[str] = []
+    current_chars: list[str] = []
+    length = len(clean)
+
+    for index, char in enumerate(clean):
+        current_chars.append(char)
+        if char not in delimiters:
+            continue
+
+        next_char = clean[index + 1] if index + 1 < length else ""
+        prev_char = clean[index - 1] if index - 1 >= 0 else ""
+
+        if next_char in delimiters:
+            continue
+
+        # 防止文本编码损坏时出现 "????" 导致每字符切分
+        if char == "?" and prev_char == "?":
+            continue
+
+        candidate = "".join(current_chars).strip()
+        if candidate:
+            sentences.append(candidate)
+        current_chars = []
+
+    tail = "".join(current_chars).strip()
+    if tail:
+        sentences.append(tail)
+
+    return sentences
 
 
 def group_sentences(sentences: list[str], sentences_per_segment: int) -> list[str]:
@@ -228,4 +257,3 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
     except Exception:
         logger.exception("Analyze characters failed, fallback to local extractor")
         return _fallback_character_analysis(text), 0.5, selected_model
-
