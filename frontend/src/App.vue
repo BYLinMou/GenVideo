@@ -30,7 +30,7 @@ const form = reactive({
   max_segment_groups: 0,
   resolution: '1080x1920',
   image_aspect_ratio: '',
-  subtitle_style: 'highlight',
+  subtitle_style: 'yellow_black',
   camera_motion: 'vertical',
   fps: 30,
   bgm_enabled: true,
@@ -797,10 +797,9 @@ onUnmounted(() => {
         <div>
           <label>{{ t('field.subtitleStyle') }}</label>
           <el-select v-model="form.subtitle_style" style="width: 100%">
-            <el-option :label="t('option.subtitleBasic')" value="basic" />
-            <el-option :label="t('option.subtitleHighlight')" value="highlight" />
-            <el-option :label="t('option.subtitleDanmaku')" value="danmaku" />
-            <el-option :label="t('option.subtitleCenter')" value="center" />
+            <el-option label="黄字黑边" value="yellow_black" />
+            <el-option label="黑字白边" value="black_white" />
+            <el-option label="白字黑边" value="white_black" />
           </el-select>
         </div>
 

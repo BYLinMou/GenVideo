@@ -100,7 +100,19 @@ def _split_subtitle_sentences(text: str) -> list[str]:
     if not clean:
         return []
 
-    delimiters = {"。", "！", "？", "；", ".", "!", "?", ";"}
+    delimiters = {
+        ",",
+        ".",
+        "!",
+        "?",
+        ";",
+        "，",  # ?
+        "、",  # ?
+        "。",  # ?
+        "！",  # ?
+        "？",  # ?
+        "；",  # ?
+    }
     units: list[str] = []
     current_chars: list[str] = []
     length = len(clean)
@@ -159,13 +171,22 @@ def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], sty
     color = "#FFFFFF"
     stroke_color = "#111111"
     y_pos = int(height * 0.78)
+
     if style == "center":
         y_pos = int(height * 0.45)
     elif style == "danmaku":
         y_pos = int(height * 0.15)
         fontsize = 38
-    elif style == "highlight":
+
+    if style in {"highlight", "yellow_black"}:
         color = "#F9E96A"
+        stroke_color = "#111111"
+    elif style == "black_white":
+        color = "#111111"
+        stroke_color = "#FFFFFF"
+    elif style in {"basic", "white_black"}:
+        color = "#FFFFFF"
+        stroke_color = "#111111"
 
     font_path = _subtitle_font_path()
     subtitles: list[TextClip] = []

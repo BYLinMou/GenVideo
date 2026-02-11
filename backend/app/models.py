@@ -78,7 +78,15 @@ class GenerateVideoRequest(BaseModel):
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1080x1920"
     image_aspect_ratio: str | None = None
-    subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
+    subtitle_style: Literal[
+        "basic",
+        "highlight",
+        "danmaku",
+        "center",
+        "yellow_black",
+        "black_white",
+        "white_black",
+    ] = "yellow_black"
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
