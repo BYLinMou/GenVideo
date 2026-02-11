@@ -1,42 +1,55 @@
 # GenVideo
 
-小說推文視頻生成系統（前後端完整實作）：
-- 動態模型列表
-- AI 角色分析與建議音色
-- 文本分段（句子/固定/智能）
-- 圖片 + TTS + 字幕合成視頻
-- 任務狀態查詢與下載
+Novel-to-video generation system with full backend + frontend implementation.
 
-## 目錄
+## Features
 
-- `backend/` FastAPI + MoviePy
+- Dynamic LLM model list (`/api/models`)
+- AI character analysis + editable character config
+- Text segmentation (`sentence` / `fixed` / `smart`)
+- Video generation pipeline (image + TTS + subtitles)
+- Job polling and video download
+- Cost-aware image grouping: multiple segments can reuse one image
+
+## Project Structure
+
+- `backend/` FastAPI + MoviePy services
 - `frontend/` Vue 3 + Element Plus + Vite
-- `plans/` 規劃文件
+- `plans/` planning docs
 
-## 環境準備
+## Requirements
 
-1. 安裝 Python 3.11+
-2. 安裝 Node.js 18+
-3. 安裝 ffmpeg（MoviePy 需要）
+1. Python 3.11+
+2. Node.js 18+
+3. FFmpeg (required by MoviePy)
 
-## 配置
+## Environment Config
 
-複製 `.env.example` 為 `.env` 或使用 `.env.local`。
+Copy `.env.example` to `.env` (or use `.env.local`).
 
-建議至少配置：
+Required:
 
 - `LLM_API_KEY`
 - `LLM_API_BASE_URL`
 - `IMAGE_API_KEY`
 - `IMAGE_API_URL`
 
-可選：
+Optional:
 
-- `TTS_API_URL`（留空時走 `edge-tts`）
 - `LLM_DEFAULT_MODEL`
 - `IMAGE_MODEL`
+- `TTS_API_URL` (if empty, fallback to `edge-tts`)
 
-## 啟動後端
+### Segment/Image Rules
+
+- `max_segments` (request/frontend): max rendered segments per job.
+  - `0` means process all segments.
+  - Example: if segmentation returns 50 and `max_segments=20`, only first 20 are rendered.
+- `segments_per_image` (request/frontend): how many segments share one generated image.
+  - Default: `5`
+  - Example: 50 segments with `segments_per_image=5` => about 10 generated images.
+
+## Run Backend
 
 ```bash
 cd backend
@@ -46,9 +59,9 @@ pip install -r requirements.txt
 python run.py
 ```
 
-後端默認啟動在 `http://localhost:8000`
+Backend default: `http://localhost:8000`
 
-## 啟動前端
+## Run Frontend
 
 ```bash
 cd frontend
@@ -56,10 +69,11 @@ npm install
 npm run dev
 ```
 
-前端默認啟動在 `http://localhost:5173`
+Frontend default: `http://localhost:5173`
 
-## 主要 API
+## Main APIs
 
+- `GET /api/health`
 - `GET /api/models`
 - `POST /api/analyze-characters`
 - `POST /api/confirm-characters`
@@ -68,8 +82,19 @@ npm run dev
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/video`
 
-## 備註
+### `POST /api/generate-video` key fields
 
-- 若圖片 API/TTS API 不可用，系統會自動使用降級方案（佔位圖/靜音音頻）確保流程可跑通。
-- 任務產物輸出在 `outputs/`。
+- `text`
+- `characters`
+- `segment_method`
+- `max_segments` (default 0 = all)
+- `segments_per_image` (default 5)
+- `resolution`
+- `subtitle_style`
+- `fps`
+- `model_id`
 
+## Notes
+
+- If image API/TTS fails, backend uses fallback strategies (placeholder image/silent audio) so flow remains testable.
+- Output files are under `outputs/`.

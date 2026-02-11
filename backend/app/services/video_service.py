@@ -117,13 +117,16 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
     try:
         update("running", 0.05, "segment", "正在分段文本")
         segments = await _segment_text(payload.text, payload.segment_method, payload.model_id)
-        segments = segments[: settings.max_segments]
+        if payload.max_segments > 0:
+            segments = segments[: payload.max_segments]
         if not segments:
             raise ValueError("No text segments produced")
 
         resolution = _parse_resolution(payload.resolution)
+        segments_per_image = max(1, int(payload.segments_per_image or 1))
         clip_infos: list[dict] = []
         total = len(segments)
+        cached_images: dict[int, str] = {}
 
         for index, segment_text in enumerate(segments):
             current_progress = 0.08 + (index / total) * 0.78
@@ -132,15 +135,22 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             character = _pick_character(payload.characters, segment_text)
             prompt = f"{character.base_prompt or character.appearance or character.name}, {character.suggested_style}, {segment_text}"
 
-            image_path = temp_root / f"segment_{index:03d}.png"
+            image_group_index = index // segments_per_image
+            image_path = temp_root / f"image_group_{image_group_index:03d}.png"
             audio_path = temp_root / f"segment_{index:03d}.mp3"
 
-            image_task = asyncio.create_task(generate_image(prompt=prompt, output_path=image_path, resolution=resolution))
             audio_task = asyncio.create_task(
                 synthesize_tts(text=segment_text, voice=character.suggested_voice, output_path=audio_path)
             )
 
-            image_result, audio_bundle = await asyncio.gather(image_task, audio_task)
+            if image_group_index in cached_images:
+                image_result = Path(cached_images[image_group_index])
+                audio_bundle = await audio_task
+            else:
+                image_task = asyncio.create_task(generate_image(prompt=prompt, output_path=image_path, resolution=resolution))
+                image_result, audio_bundle = await asyncio.gather(image_task, audio_task)
+                cached_images[image_group_index] = str(image_result)
+
             audio_result_path, duration = audio_bundle
 
             clip_infos.append(

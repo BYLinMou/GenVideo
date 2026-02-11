@@ -21,6 +21,8 @@ const form = reactive({
   text: '',
   analysis_depth: 'detailed',
   segment_method: 'smart',
+  max_segments: 0,
+  segments_per_image: 5,
   resolution: '1080x1920',
   subtitle_style: 'highlight',
   fps: 30
@@ -43,6 +45,14 @@ let pollingTimer = null
 
 const canAnalyze = computed(() => Boolean(selectedModel.value && form.text.trim()))
 const canGenerate = computed(() => characters.value.length > 0 && form.text.trim())
+const estimatedImageCount = computed(() => {
+  if (!segments.value.length) return 0
+  const effectiveSegmentCount =
+    Number(form.max_segments || 0) > 0
+      ? Math.min(segments.value.length, Number(form.max_segments))
+      : segments.value.length
+  return Math.ceil(effectiveSegmentCount / Math.max(1, Number(form.segments_per_image || 1)))
+})
 
 function nextStep() {
   activeStep.value = Math.min(activeStep.value + 1, steps.length - 1)
@@ -180,6 +190,8 @@ async function runGenerate() {
       text: form.text,
       characters: characters.value,
       segment_method: form.segment_method,
+      max_segments: form.max_segments,
+      segments_per_image: form.segments_per_image,
       resolution: form.resolution,
       subtitle_style: form.subtitle_style,
       fps: form.fps,
@@ -271,6 +283,12 @@ onMounted(() => {
           <el-form-item label="FPS">
             <el-input-number v-model="form.fps" :min="15" :max="60" />
           </el-form-item>
+          <el-form-item label="最大處理段數（0=全部）">
+            <el-input-number v-model="form.max_segments" :min="0" :max="10000" />
+          </el-form-item>
+          <el-form-item label="每幾段共用一張圖">
+            <el-input-number v-model="form.segments_per_image" :min="1" :max="50" />
+          </el-form-item>
         </div>
         <div class="actions">
           <el-button :loading="loading.segment" @click="runSegmentPreview">預覽分段</el-button>
@@ -285,10 +303,21 @@ onMounted(() => {
         show-icon
         :closable="false"
       />
+      <el-alert
+        v-if="segments.length"
+        :title="`成本提示：文本共 ${segments.length} 段；實際處理 ${form.max_segments > 0 ? Math.min(segments.length, form.max_segments) : segments.length} 段；預估生成 ${estimatedImageCount} 張圖片（每 ${form.segments_per_image} 段共用一張）`"
+        type="warning"
+        show-icon
+        :closable="false"
+      />
     </section>
 
     <section v-if="segments.length" class="card">
       <h2>分段預覽（{{ segments.length }} 段）</h2>
+      <p class="muted">
+        實際處理段數：{{ form.max_segments > 0 ? Math.min(segments.length, form.max_segments) : segments.length }}；
+        預估圖片數：{{ estimatedImageCount }}（每 {{ form.segments_per_image }} 段共用一張）
+      </p>
       <ol class="segments">
         <li v-for="item in segments" :key="item.index">{{ item.text }}</li>
       </ol>
@@ -358,4 +387,3 @@ onMounted(() => {
     </section>
   </div>
 </template>
-

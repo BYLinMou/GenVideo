@@ -61,6 +61,8 @@ class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
     segment_method: Literal["sentence", "fixed", "smart"] = "smart"
+    max_segments: int = Field(default=0, ge=0, le=10000)
+    segments_per_image: int = Field(default=5, ge=1, le=50)
     resolution: str = "1080x1920"
     subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
     fps: int = 30
@@ -80,4 +82,3 @@ class JobStatus(BaseModel):
     message: str = ""
     output_video_url: str | None = None
     output_video_path: str | None = None
-

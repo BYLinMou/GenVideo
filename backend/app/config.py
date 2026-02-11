@@ -31,9 +31,7 @@ class Settings(BaseSettings):
 
     output_dir: str = Field(default="outputs", alias="OUTPUT_DIR")
     temp_dir: str = Field(default="outputs/temp", alias="TEMP_DIR")
-    max_segments: int = Field(default=20, alias="MAX_SEGMENTS")
     cors_allow_origins: str = Field(default="*", alias="CORS_ALLOW_ORIGINS")
 
 
 settings = Settings()
-
