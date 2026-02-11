@@ -364,7 +364,7 @@ _ALIAS_STOPWORDS = {
 
 def _sanitize_alias(value: str) -> str:
     raw = re.sub(r"\s+", "", str(value or ""))
-    cleaned = "".join(ch for ch in raw if "\u4e00" <= ch <= "\u9fff")
+    cleaned = "".join(ch for ch in raw if "\u4e00" <= ch <= "\u9fa5")
     return cleaned
 
 
@@ -375,7 +375,7 @@ def _is_alias_valid(alias: str) -> bool:
         return False
     if any(token in alias for token in _ALIAS_STOPWORDS):
         return False
-    if not re.fullmatch(r"[\u4e00-\u9fff]{4,8}", alias):
+    if not re.fullmatch(r"[\u4e00-\u9fa5]{4,8}", alias):
         return False
     return True
 
@@ -421,7 +421,8 @@ def _alias_prompt(text: str, count: int) -> str:
         "2) 不能包含数字、英文字母、标点符号、空格；\n"
         "3) 禁止使用常见词语/俗语/成语/地名作为核心表达；\n"
         "4) 风格要和原文题材、情绪、意象一致；\n"
-        f"5) 一次输出{count}个，不要重复。\n"
+        f"5) 一次输出{count}个，不要重复；\n"
+        "6) 禁止使用生僻字，尽量使用常用汉字。\n"
         "仅输出严格JSON：{\"aliases\":[\"别名1\",\"别名2\"]}\n\n"
         f"文本：\n{text[:12000]}"
     )

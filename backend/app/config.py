@@ -21,7 +21,7 @@ class Settings(BaseSettings):
 
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
     llm_api_base_url: str = Field(default="https://api.openai.com/v1", alias="LLM_API_BASE_URL")
-    llm_default_model: str = Field(default="gpt-4o-mini", alias="LLM_DEFAULT_MODEL")
+    llm_default_model: str = Field(default="gpt-oss-120b", alias="LLM_DEFAULT_MODEL")
 
     image_api_key: str = Field(default="", alias="IMAGE_API_KEY")
     image_api_url: str = Field(default="https://api.poe.com/v1", alias="IMAGE_API_URL")

@@ -405,7 +405,8 @@ async function loadModels() {
   try {
     const data = await api.getModels()
     models.value = data.models || []
-    selectedModel.value = models.value.find((item) => item.available)?.id || models.value[0]?.id || ''
+    const preferred = models.value.find((item) => item.id === 'gpt-oss-120b' && item.available)
+    selectedModel.value = preferred?.id || models.value.find((item) => item.available)?.id || models.value[0]?.id || ''
   } catch (error) {
     ElMessage.error(t('toast.modelsLoadFailed', { error: error.message }))
   } finally {
@@ -674,17 +675,16 @@ function applyAlias(alias) {
   if (!alias) return
   const lines = (form.text || '').split('\n')
   const titleLinePattern = /^\s*(书名|标题|小说名|小说标题)\s*[：:]/
-  let replaced = false
-  const next = lines.map((line) => {
-    if (!replaced && titleLinePattern.test(line)) {
-      replaced = true
-      return line.replace(/([：:]).*$/, `$1${alias}`)
-    }
-    return line
-  })
-  if (!replaced) {
-    next.unshift(`书名：${alias}`)
+
+  const next = [...lines]
+  const titleIndex = next.findIndex((line) => titleLinePattern.test(line))
+  const titleLine = `书名：${alias}。`
+  if (titleIndex >= 0) {
+    next[titleIndex] = titleLine
+  } else {
+    next.unshift(titleLine)
   }
+
   form.text = next.join('\n')
   ElMessage.success(`已应用别名：${alias}`)
 }
