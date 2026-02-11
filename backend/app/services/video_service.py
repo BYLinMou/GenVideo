@@ -96,7 +96,8 @@ def _subtitle_font_path() -> str | None:
 
 
 def _split_subtitle_sentences(text: str) -> list[str]:
-    clean = re.sub(r"\s+", " ", text.strip())
+    clean = (text or "").replace("\r\n", "").replace("\n", "").replace("\r", "")
+    clean = re.sub(r"[ \t\f\v]+", " ", clean).strip()
     if not clean:
         return []
 
@@ -343,6 +344,8 @@ def _render_final_sync(
         bgm_enabled = bool(bgm_enabled)
         bgm_volume = max(0.0, min(float(bgm_volume), 1.0))
         bgm_path = project_path("assets/bgm.mp3")
+        if not bgm_path.exists():
+            bgm_path = project_path("assets/bgm/happinessinmusic-rock-trailer-417598.mp3")
         if bgm_enabled and bgm_volume > 0:
             if bgm_path.exists():
                 final_duration = max(float(final.duration or 0.0), 0.0)

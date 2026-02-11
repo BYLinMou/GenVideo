@@ -60,6 +60,9 @@ export const api = {
   analyzeCharacters(payload) {
     return jsonRequest('/api/analyze-characters', 'POST', payload)
   },
+  generateNovelAliases(payload) {
+    return jsonRequest('/api/generate-novel-aliases', 'POST', payload)
+  },
   confirmCharacters(payload) {
     return jsonRequest('/api/confirm-characters', 'POST', payload)
   },

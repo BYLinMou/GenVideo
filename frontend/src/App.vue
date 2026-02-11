@@ -16,6 +16,7 @@ const loading = reactive({
   models: false,
   voices: false,
   refs: false,
+  aliases: false,
   analyze: false,
   segment: false,
   generate: false,
@@ -26,11 +27,11 @@ const form = reactive({
   text: '',
   analysis_depth: 'detailed',
   segment_method: 'sentence',
-  sentences_per_segment: 1,
+  sentences_per_segment: 5,
   max_segment_groups: 0,
-  resolution: '1080x1920',
+  resolution: '1920x1080',
   image_aspect_ratio: '',
-  subtitle_style: 'yellow_black',
+  subtitle_style: 'white_black',
   camera_motion: 'vertical',
   fps: 30,
   bgm_enabled: true,
@@ -103,6 +104,7 @@ const nameReplace = reactive({
 })
 
 const replacementEntries = ref([])
+const novelAliases = ref([])
 
 const replacementEnabledCount = computed(() => {
   return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
@@ -601,6 +603,52 @@ async function generateRefImage(character, index) {
   }
 }
 
+async function generateNovelAliases() {
+  const textForRun = applyNameReplacements(form.text)
+  if (!textForRun.trim()) {
+    ElMessage.warning('请先输入文本')
+    return
+  }
+
+  loading.aliases = true
+  try {
+    const data = await api.generateNovelAliases({
+      text: textForRun,
+      count: 10,
+      model_id: selectedModel.value || null
+    })
+    novelAliases.value = data.aliases || []
+    if (!novelAliases.value.length) {
+      ElMessage.warning('未生成可用别名，请重试')
+    } else {
+      ElMessage.success(`已生成 ${novelAliases.value.length} 个别名`) 
+    }
+  } catch (error) {
+    ElMessage.error(`别名生成失败：${error.message}`)
+  } finally {
+    loading.aliases = false
+  }
+}
+
+function applyAlias(alias) {
+  if (!alias) return
+  const lines = (form.text || '').split('\n')
+  const titleLinePattern = /^\s*(书名|标题|小说名|小说标题)\s*[：:]/
+  let replaced = false
+  const next = lines.map((line) => {
+    if (!replaced && titleLinePattern.test(line)) {
+      replaced = true
+      return line.replace(/([：:]).*$/, `$1${alias}`)
+    }
+    return line
+  })
+  if (!replaced) {
+    next.unshift(`书名：${alias}`)
+  }
+  form.text = next.join('\n')
+  ElMessage.success(`已应用别名：${alias}`)
+}
+
 function formatFileSize(bytes) {
   const value = Number(bytes || 0)
   if (!Number.isFinite(value) || value <= 0) return '0 B'
@@ -852,7 +900,7 @@ onUnmounted(() => {
           <span v-if="bgmStatus.source_filename"> ｜ 来源：{{ bgmStatus.source_filename }}</span>
           <span v-if="bgmStatus.updated_at"> ｜ 更新时间：{{ bgmStatus.updated_at }}</span>
         </span>
-        <span v-else>当前BGM：未上传（默认读取 assets/bgm.mp3）</span>
+        <span v-else>当前BGM：未找到（默认回退 assets/bgm/happinessinmusic-rock-trailer-417598.mp3）</span>
       </div>
     </section>
 
@@ -875,6 +923,25 @@ onUnmounted(() => {
           <span class="muted" v-if="replacementEntries.length">
             共 {{ replacementEntries.length }} 个候选，已启用 {{ replacementEnabledCount }} 个
           </span>
+        </div>
+      </div>
+
+      <div class="replace-toolbar">
+        <div class="actions">
+          <el-button :loading="loading.aliases" @click="generateNovelAliases">生成小说别名（10个）</el-button>
+          <el-button :disabled="loading.aliases" @click="generateNovelAliases">重新生成</el-button>
+          <span class="muted" v-if="novelAliases.length">点击下方任意别名即可应用</span>
+        </div>
+        <div class="alias-list" v-if="novelAliases.length">
+          <el-tag
+            v-for="item in novelAliases"
+            :key="item"
+            class="alias-item"
+            effect="plain"
+            @click="applyAlias(item)"
+          >
+            {{ item }}
+          </el-tag>
         </div>
       </div>
 

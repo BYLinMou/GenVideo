@@ -26,6 +26,8 @@ from .models import (
     CharacterImageItem,
     ConfirmCharactersRequest,
     CreateCharacterImageRequest,
+    GenerateNovelAliasesRequest,
+    GenerateNovelAliasesResponse,
     GenerateVideoRequest,
     GenerateVideoResponse,
     RemixBgmRequest,
@@ -40,6 +42,7 @@ from .services.character_assets_service import (
 )
 from .services.llm_service import (
     analyze_characters,
+    generate_novel_aliases,
     group_sentences,
     segment_by_fixed,
     segment_by_smart,
@@ -95,8 +98,19 @@ def _bgm_current_path() -> Path:
     return project_path("assets/bgm.mp3")
 
 
-def _current_bgm_source_filename() -> str | None:
+def _bgm_default_path() -> Path:
+    return project_path("assets/bgm/happinessinmusic-rock-trailer-417598.mp3")
+
+
+def _resolve_active_bgm_path() -> Path:
     current = _bgm_current_path()
+    if current.exists():
+        return current
+    return _bgm_default_path()
+
+
+def _current_bgm_source_filename() -> str | None:
+    current = _resolve_active_bgm_path()
     if not current.exists():
         return None
 
@@ -147,6 +161,15 @@ async def analyze_characters_api(payload: AnalyzeCharactersRequest) -> AnalyzeCh
         raise HTTPException(status_code=400, detail="text is required")
     characters, confidence, model_used = await analyze_characters(payload.text, payload.analysis_depth, payload.model_id)
     return AnalyzeCharactersResponse(characters=characters, confidence=confidence, model_used=model_used)
+
+
+@app.post("/api/generate-novel-aliases", response_model=GenerateNovelAliasesResponse)
+async def generate_novel_aliases_api(payload: GenerateNovelAliasesRequest) -> GenerateNovelAliasesResponse:
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    aliases, model_used = await generate_novel_aliases(text=text, count=payload.count, model_id=payload.model_id)
+    return GenerateNovelAliasesResponse(aliases=aliases, model_used=model_used)
 
 
 @app.post("/api/confirm-characters")
@@ -300,7 +323,7 @@ async def delete_current_bgm() -> dict:
 
 @app.get("/api/bgm", response_model=BgmStatusResponse)
 async def get_bgm_status() -> BgmStatusResponse:
-    bgm_path = _bgm_current_path()
+    bgm_path = _resolve_active_bgm_path()
     if not bgm_path.exists():
         return BgmStatusResponse(
             exists=False,

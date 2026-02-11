@@ -90,6 +90,17 @@ label {
   gap: 8px;
 }
 
+.alias-list {
+  margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.alias-item {
+  cursor: pointer;
+}
+
 .replace-item {
   display: grid;
   grid-template-columns: auto auto auto auto 1fr;

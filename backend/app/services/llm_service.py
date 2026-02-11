@@ -58,8 +58,13 @@ def _extract_json_object(text: str) -> dict | None:
         return None
 
 
+def _normalize_segmentation_text(text: str) -> str:
+    raw = (text or "").replace("\r\n", "").replace("\n", "").replace("\r", "")
+    return re.sub(r"[ \t\f\v]+", " ", raw).strip()
+
+
 def split_sentences(text: str) -> list[str]:
-    clean = re.sub(r"\s+", " ", text.strip())
+    clean = _normalize_segmentation_text(text)
     if not clean:
         return []
 
@@ -68,7 +73,11 @@ def split_sentences(text: str) -> list[str]:
         "\uff01",  # exclamation
         "\uff1f",  # question
         "\uff1b",  # semicolon
+        "\uff0c",  # comma
+        "\u3001",  # pause comma
+        ".",
         ";",
+        ",",
         "!",
         "?",
     }
@@ -119,22 +128,23 @@ def segment_by_sentence_groups(text: str, sentences_per_segment: int) -> list[st
 
 
 def segment_by_fixed(text: str, chunk_size: int = 120) -> list[str]:
-    clean = re.sub(r"\s+", " ", text.strip())
+    clean = _normalize_segmentation_text(text)
     if not clean:
         return []
     return [clean[index : index + chunk_size] for index in range(0, len(clean), chunk_size)]
 
 
 async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
+    clean_text = _normalize_segmentation_text(text)
     selected_model = model_id or settings.llm_default_model
     if not settings.llm_api_key:
-        return segment_by_sentence_groups(text, sentences_per_segment=5)
+        return segment_by_sentence_groups(clean_text, sentences_per_segment=5)
 
     prompt = (
         "Split the following novel text into short-video segments. "
         "Try to cut at scene transitions and keep semantic coherence. "
         "Return strict JSON only in this schema: {\"segments\":[\"Segment 1\",\"Segment 2\"]}.\n\n"
-        f"Text:\n{text[:14000]}"
+        f"Text:\n{clean_text[:14000]}"
     )
     payload = {
         "model": selected_model,
@@ -163,7 +173,7 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
     except Exception:
         logger.exception("Smart segmentation failed, fallback to sentence groups")
 
-    return segment_by_sentence_groups(text, sentences_per_segment=5)
+    return segment_by_sentence_groups(clean_text, sentences_per_segment=5)
 
 
 def _clean_text(value: str | None, limit: int) -> str:
@@ -325,6 +335,152 @@ def _character_prompt(text: str, depth: str) -> str:
     voice_lines = "\n".join(
         f"- {voice.id} | {voice.name} | {voice.gender}/{voice.age} | {voice.description}" for voice in VOICE_INFOS
     )
+
+
+_ALIAS_STOPWORDS = {
+    "天下",
+    "江湖",
+    "苍生",
+    "王朝",
+    "帝国",
+    "都市",
+    "校园",
+    "重生",
+    "逆袭",
+    "传奇",
+    "神话",
+    "风云",
+    "山河",
+    "春秋",
+    "长安",
+    "洛阳",
+    "金陵",
+    "燕京",
+    "姑苏",
+    "巴蜀",
+    "中原",
+}
+
+
+def _sanitize_alias(value: str) -> str:
+    raw = re.sub(r"\s+", "", str(value or ""))
+    cleaned = "".join(ch for ch in raw if "\u4e00" <= ch <= "\u9fff")
+    return cleaned
+
+
+def _is_alias_valid(alias: str) -> bool:
+    if not alias:
+        return False
+    if not (4 <= len(alias) <= 8):
+        return False
+    if any(token in alias for token in _ALIAS_STOPWORDS):
+        return False
+    if not re.fullmatch(r"[\u4e00-\u9fff]{4,8}", alias):
+        return False
+    return True
+
+
+def _fallback_aliases(text: str, count: int) -> list[str]:
+    seed = _sanitize_alias((text or "")[:24])
+    base = seed[:4] if len(seed) >= 4 else "此间风骨"
+    pool = [
+        f"{base}微光",
+        f"{base}旧梦",
+        f"{base}余烬",
+        f"{base}暗潮",
+        f"{base}长夜",
+        f"{base}孤舟",
+        f"{base}星霜",
+        f"{base}归途",
+        f"{base}残照",
+        f"{base}回响",
+        "雾中焰心",
+        "夜潮归人",
+        "风痕未冷",
+        "烬海拾光",
+        "雪骨沉灯",
+    ]
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in pool:
+        candidate = _sanitize_alias(item)
+        if not _is_alias_valid(candidate) or candidate in seen:
+            continue
+        seen.add(candidate)
+        output.append(candidate)
+        if len(output) >= count:
+            break
+    return output
+
+
+def _alias_prompt(text: str, count: int) -> str:
+    return (
+        "你是中文小说命名顾问。请基于文本生成小说‘别名’候选。"
+        "硬性规则：\n"
+        "1) 每个别名必须是4到8个汉字；\n"
+        "2) 不能包含数字、英文字母、标点符号、空格；\n"
+        "3) 禁止使用常见词语/俗语/成语/地名作为核心表达；\n"
+        "4) 风格要和原文题材、情绪、意象一致；\n"
+        f"5) 一次输出{count}个，不要重复。\n"
+        "仅输出严格JSON：{\"aliases\":[\"别名1\",\"别名2\"]}\n\n"
+        f"文本：\n{text[:12000]}"
+    )
+
+
+async def generate_novel_aliases(text: str, count: int, model_id: str | None) -> tuple[list[str], str]:
+    selected_model = model_id or settings.llm_default_model
+    wanted = max(1, min(20, int(count or 10)))
+
+    def _dedupe(items: list[str]) -> list[str]:
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            cleaned = _sanitize_alias(item)
+            if not _is_alias_valid(cleaned):
+                continue
+            if cleaned in seen:
+                continue
+            seen.add(cleaned)
+            result.append(cleaned)
+            if len(result) >= wanted:
+                break
+        return result
+
+    if not settings.llm_api_key:
+        return _fallback_aliases(text, wanted), selected_model
+
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "user", "content": _alias_prompt(text, wanted)},
+        ],
+        "temperature": 0.85,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.llm_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=60) as client:
+            response = await client.post(_base_url("/chat/completions"), headers=headers, json=payload)
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            parsed = _extract_json_object(content) or {}
+            aliases = parsed.get("aliases") if isinstance(parsed, dict) else []
+            if not isinstance(aliases, list):
+                aliases = []
+
+            normalized = _dedupe([str(item) for item in aliases])
+            if len(normalized) < wanted:
+                fallback = _fallback_aliases(text, wanted * 2)
+                normalized = _dedupe(normalized + fallback)
+            return normalized[:wanted], selected_model
+    except Exception:
+        logger.exception("Generate novel aliases failed, fallback to local")
+        return _fallback_aliases(text, wanted), selected_model
     allowed_ids = ", ".join(sorted(_VOICE_ID_SET))
     return (
         "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "

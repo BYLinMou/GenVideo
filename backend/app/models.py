@@ -46,6 +46,17 @@ class AnalyzeCharactersResponse(BaseModel):
     model_used: str
 
 
+class GenerateNovelAliasesRequest(BaseModel):
+    text: str
+    count: int = Field(default=10, ge=1, le=20)
+    model_id: str | None = None
+
+
+class GenerateNovelAliasesResponse(BaseModel):
+    aliases: list[str]
+    model_used: str
+
+
 class ConfirmCharactersRequest(BaseModel):
     characters: list[CharacterSuggestion]
 
@@ -54,7 +65,7 @@ class SegmentTextRequest(BaseModel):
     text: str
     method: Literal["sentence", "fixed", "smart"] = "sentence"
     fixed_size: int = Field(default=120, ge=20, le=1000)
-    sentences_per_segment: int = Field(default=1, ge=1, le=50)
+    sentences_per_segment: int = Field(default=5, ge=1, le=50)
     model_id: str | None = None
 
 
@@ -74,9 +85,9 @@ class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
     segment_method: Literal["sentence", "fixed", "smart"] = "sentence"
-    sentences_per_segment: int = Field(default=1, ge=1, le=50)
+    sentences_per_segment: int = Field(default=5, ge=1, le=50)
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
-    resolution: str = "1080x1920"
+    resolution: str = "1920x1080"
     image_aspect_ratio: str | None = None
     subtitle_style: Literal[
         "basic",
@@ -86,7 +97,7 @@ class GenerateVideoRequest(BaseModel):
         "yellow_black",
         "black_white",
         "white_black",
-    ] = "yellow_black"
+    ] = "white_black"
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
