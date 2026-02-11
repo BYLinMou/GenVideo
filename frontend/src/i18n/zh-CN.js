@@ -1,0 +1,106 @@
+const zhCN = {
+  app: {
+    title: '小说转视频工作台',
+    subtitle: '先做分段和角色，再生成参考图、分镜短片与最终视频。'
+  },
+  section: {
+    config: '基础配置',
+    text: '文本与预处理',
+    segmentPreview: '分段预览',
+    characters: '角色配置（语音 + 参考图）',
+    render: '视频生成',
+    logs: '后端日志'
+  },
+  field: {
+    model: '模型',
+    analysisDepth: '分析深度',
+    segmentMethod: '分段方式',
+    sentencesPerSegment: '每段句数',
+    maxSegmentGroups: '最大处理段数',
+    maxSegmentHelp: '0 表示处理全部段',
+    resolution: '分辨率',
+    subtitleStyle: '字幕样式',
+    fps: 'FPS',
+    sceneReuse: '启用图片复用缓存',
+    textInput: '小说文本',
+    confidence: '识别置信度',
+    roleName: '角色名称',
+    roleType: '角色定位',
+    voice: 'TTS 音色',
+    referenceImage: '参考图',
+    appearance: '外观描述',
+    personality: '性格描述',
+    basePrompt: '角色基础 Prompt'
+  },
+  option: {
+    basic: '基础',
+    detailed: '详细',
+    sentence: '按句分段',
+    smart: '智能分段',
+    fixed: '固定字数',
+    resolution1080x1920: '1080x1920（竖屏）',
+    resolution720x1280: '720x1280（竖屏）',
+    resolution1920x1080: '1920x1080（横屏）',
+    subtitleBasic: '基础',
+    subtitleHighlight: '高亮',
+    subtitleDanmaku: '弹幕',
+    subtitleCenter: '居中',
+    unavailable: '不可用'
+  },
+  action: {
+    segmentPreview: '预览分段',
+    analyze: '分析角色',
+    confirmCharacters: '确认角色配置',
+    pickReference: '选择参考图',
+    clearReference: '清除参考图',
+    uploadReference: '上传参考图',
+    generateReference: '生成角色参考图',
+    generateVideo: '开始生成视频',
+    cancelJob: '取消任务',
+    refreshLogs: '刷新日志',
+    close: '关闭',
+    downloadFinal: '下载最终视频'
+  },
+  placeholder: {
+    modelSearch: '选择模型（支持输入搜索）',
+    modelNoMatch: '无匹配模型',
+    textInput: '输入小说文本'
+  },
+  hint: {
+    segmentSummary: '总句数 {sentences}，分段数 {segments}，预计处理 {effective} 段',
+    sentenceRule: '当前按每 {count} 句一段（句号/问号/感叹号/分号/逗号均可切分）',
+    selectedRef: '已选择：{filename}',
+    noRefImage: '暂无参考图，请先上传或生成。',
+    clip: '分镜短片 #{index}',
+    finalVideo: '最终视频',
+    jobId: '任务 ID',
+    jobStatus: '状态',
+    jobMessage: '消息'
+  },
+  toast: {
+    textRequired: '请先输入文本',
+    characterRequired: '请先分析并确认角色配置',
+    modelsLoadFailed: '模型加载失败：{error}',
+    voicesLoadFailed: '音色列表加载失败：{error}',
+    refsLoadFailed: '参考图库加载失败：{error}',
+    logsLoadFailed: '读取日志失败：{error}',
+    analyzeSuccess: '角色分析完成',
+    analyzeFailed: '角色分析失败：{error}',
+    segmentSuccess: '分段完成：{segments} 段（总句数：{sentences}）',
+    segmentFailed: '分段失败：{error}',
+    confirmSuccess: '角色配置已确认',
+    confirmFailed: '确认失败：{error}',
+    statusFailed: '获取任务状态失败：{error}',
+    completed: '视频生成完成',
+    queued: '任务已创建，开始生成',
+    generateFailed: '创建任务失败：{error}',
+    cancelSuccess: '已请求取消任务',
+    cancelFailed: '取消任务失败：{error}',
+    uploadSuccess: '参考图上传成功',
+    uploadFailed: '上传参考图失败：{error}',
+    refGenerated: '角色参考图生成成功',
+    refGenerateFailed: '生成参考图失败：{error}'
+  }
+}
+
+export default zhCN

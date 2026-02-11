@@ -59,6 +59,8 @@ app.add_middleware(
 project_path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.temp_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.character_ref_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.scene_cache_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.scene_cache_index_path).parent.mkdir(parents=True, exist_ok=True)
 
 app.mount("/outputs", StaticFiles(directory=project_path(settings.output_dir)), name="outputs")
 app.mount(

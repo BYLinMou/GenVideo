@@ -60,7 +60,17 @@ def split_sentences(text: str) -> list[str]:
     if not clean:
         return []
 
-    delimiters = {"。", "！", "？", "；", "，", ";", ",", "!", "?"}
+    delimiters = {
+        "\u3002",  # full stop
+        "\uff01",  # exclamation
+        "\uff1f",  # question
+        "\uff1b",  # semicolon
+        "\uff0c",  # comma
+        ";",
+        ",",
+        "!",
+        "?",
+    }
     sentences: list[str] = []
     current_chars: list[str] = []
     length = len(clean)
@@ -76,7 +86,7 @@ def split_sentences(text: str) -> list[str]:
         if next_char in delimiters:
             continue
 
-        # 防止文本编码损坏时出现 "????" 导致每字符切分
+        # Avoid splitting each char when broken encoding appears as "????".
         if char == "?" and prev_char == "?":
             continue
 
@@ -120,9 +130,10 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
         return segment_by_sentence_groups(text, sentences_per_segment=5)
 
     prompt = (
-        "請把以下中文小說文本分為短視頻段落，盡量在場景轉換處切分。"
-        "輸出 JSON：{\"segments\":[\"段落1\",\"段落2\"]}，只輸出 JSON。\n\n"
-        f"文本：\n{text[:14000]}"
+        "Split the following novel text into short-video segments. "
+        "Try to cut at scene transitions and keep semantic coherence. "
+        "Return strict JSON only in this schema: {\"segments\":[\"Segment 1\",\"Segment 2\"]}.\n\n"
+        f"Text:\n{text[:14000]}"
     )
     payload = {
         "model": selected_model,
@@ -156,7 +167,15 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
 
 def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
     names = re.findall(r"[\u4e00-\u9fff]{2,3}", re.sub(r"\s+", " ", text))
-    ignored = {"小說", "故事", "今天", "這個", "一個", "自己", "我們"}
+    ignored = {
+        "\u5c0f\u8bf4",  # novel
+        "\u6545\u4e8b",  # story
+        "\u4eca\u5929",  # today
+        "\u8fd9\u4e2a",  # this
+        "\u4e00\u4e2a",  # one
+        "\u81ea\u5df1",  # self
+        "\u6211\u4eec",  # we
+    }
 
     ranked: list[str] = []
     seen: set[str] = set()
@@ -169,36 +188,36 @@ def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
             break
 
     if not ranked:
-        ranked = ["旁白"]
+        ranked = ["Narrator"]
 
     output: list[CharacterSuggestion] = []
     for index, name in enumerate(ranked):
-        role = "主角" if index == 0 else "配角"
-        personality = "冷靜、果斷" if index == 0 else "溫和、友善"
+        role = "protagonist" if index == 0 else "supporting"
+        personality = "calm, decisive" if index == 0 else "kind, friendly"
         output.append(
             CharacterSuggestion(
                 name=name,
                 role=role,
                 importance=max(10 - index, 5),
-                appearance="外貌待補充",
+                appearance="appearance to be completed",
                 personality=personality,
                 voice_id=recommend_voice(role, personality),
-                base_prompt=f"{name}，{personality}，小說角色立繪",
+                base_prompt=f"{name}, {personality}, novel character illustration",
             )
         )
     return output
 
 
 def _character_prompt(text: str, depth: str) -> str:
-    detail = "請輸出詳細信息" if depth == "detailed" else "請輸出精簡信息"
+    detail = "Output detailed fields" if depth == "detailed" else "Output concise fields"
     return (
-        "你是小說角色分析助手。從文本中提取主要角色，並返回 JSON。"
-        f"{detail}。只輸出 JSON。"
-        "JSON 格式："
+        "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
+        f"{detail}. "
+        "JSON schema: "
         "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
-        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\","
-        "\"base_prompt\":\"\"}],\"confidence\":0.0}"
-        "\n\n文本：\n"
+        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
+        "\"confidence\":0.0}"
+        "\n\nText:\n"
         f"{text[:14000]}"
     )
 
@@ -236,18 +255,18 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
 
             characters: list[CharacterSuggestion] = []
             for item in raw_items:
-                role = str(item.get("role", "配角"))
+                role = str(item.get("role", "supporting"))
                 personality = str(item.get("personality", ""))
                 voice_id = str(item.get("voice_id") or recommend_voice(role, personality))
                 characters.append(
                     CharacterSuggestion(
-                        name=str(item.get("name", "角色")),
+                        name=str(item.get("name", "character")),
                         role=role,
                         importance=max(1, min(10, int(item.get("importance", 5)))),
                         appearance=str(item.get("appearance", "")),
                         personality=personality,
                         voice_id=voice_id,
-                        base_prompt=str(item.get("base_prompt", f"{item.get('name', '角色')} 立繪")),
+                        base_prompt=str(item.get("base_prompt", f"{item.get('name', 'character')} portrait")),
                     )
                 )
 

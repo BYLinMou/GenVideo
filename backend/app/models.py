@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Literal
 
@@ -24,7 +24,7 @@ class VoiceInfo(BaseModel):
 
 class CharacterSuggestion(BaseModel):
     name: str
-    role: str = "配角"
+    role: str = "supporting"
     importance: int = 5
     appearance: str = ""
     personality: str = ""
@@ -80,6 +80,7 @@ class GenerateVideoRequest(BaseModel):
     subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
     fps: int = Field(default=30, ge=15, le=60)
     model_id: str | None = None
+    enable_scene_image_reuse: bool = True
 
 
 class GenerateVideoResponse(BaseModel):

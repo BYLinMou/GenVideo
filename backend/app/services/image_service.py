@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import base64
@@ -125,7 +125,8 @@ async def generate_image(
         return await asyncio.wait_for(_remote_generate(payload), timeout=45)
     except Exception as first_error:
         logger.warning("Primary image generation failed: %s", first_error)
-        # 某些代理对纯中文提示词会返回 200 但不给图，进行英文包装重试
+        # Some proxy/image backends may return HTTP 200 but no image URL for pure CJK prompts.
+        # Retry with an English wrapper before falling back to placeholder.
         retry_prompt = (
             "Create one single image only. Do not explain. "
             f"Anime-style illustration based on this description: {prompt}"
@@ -164,3 +165,4 @@ async def use_reference_or_generate(
                 img.save(output_path)
                 return output_path
         return await _placeholder_image(prompt, output_path, resolution)
+

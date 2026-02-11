@@ -13,11 +13,13 @@ from ..config import project_path, settings
 from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
 from ..state import job_store
 from .image_service import use_reference_or_generate
-from .llm_service import (
-    group_sentences,
-    segment_by_fixed,
-    segment_by_smart,
-    split_sentences,
+from .llm_service import group_sentences, segment_by_fixed, segment_by_smart, split_sentences
+from .scene_cache_service import (
+    build_scene_descriptor,
+    ensure_scene_cache_paths,
+    find_reusable_scene_image,
+    render_cached_image_to_output,
+    save_scene_image_cache_entry,
 )
 from .tts_service import synthesize_tts
 
@@ -35,7 +37,7 @@ def _parse_resolution(value: str) -> tuple[int, int]:
 
 def _pick_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion:
     if not characters:
-        return CharacterSuggestion(name="旁白", role="旁白", voice_id="zh-CN-YunxiNeural")
+        return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
     for item in characters:
         if item.name and item.name in text:
             return item
@@ -68,6 +70,55 @@ def _subtitle_clip(text: str, duration: float, resolution: tuple[int, int], styl
     return clip.with_duration(duration).with_position(("center", y_pos))
 
 
+def _build_motion_image_clip(
+    image_path: str,
+    duration: float,
+    resolution: tuple[int, int],
+):
+    target_w, target_h = resolution
+    safe_duration = max(duration, 0.1)
+
+    base_clip = ImageClip(image_path).with_duration(safe_duration)
+    source_w = max(1.0, float(base_clip.w))
+    source_h = max(1.0, float(base_clip.h))
+
+    # Cover fit: fill entire frame without distortion.
+    cover_scale = max(target_w / source_w, target_h / source_h)
+    scaled_w = source_w * cover_scale
+    scaled_h = source_h * cover_scale
+
+    # Prefer top-to-bottom movement. If there is no vertical overflow,
+    # apply a tiny extra zoom to create vertical travel.
+    min_vertical_pan = max(24.0, target_h * 0.08)
+    extra_zoom = 1.0
+    if (scaled_h - target_h) < min_vertical_pan:
+        extra_zoom = (target_h + min_vertical_pan) / max(1.0, scaled_h)
+
+    final_w = int(round(scaled_w * extra_zoom))
+    final_h = int(round(scaled_h * extra_zoom))
+    motion_clip = base_clip.resized(new_size=(final_w, final_h))
+
+    overflow_x = max(0.0, float(final_w - target_w))
+    overflow_y = max(0.0, float(final_h - target_h))
+
+    if overflow_y > 1.0:
+        start_x, end_x = -overflow_x / 2.0, -overflow_x / 2.0
+        start_y, end_y = 0.0, -overflow_y
+    elif overflow_x > 1.0:
+        start_x, end_x = 0.0, -overflow_x
+        start_y, end_y = -overflow_y / 2.0, -overflow_y / 2.0
+    else:
+        return motion_clip.with_position(("center", "center"))
+
+    def position_at(t: float) -> tuple[float, float]:
+        progress = min(max((t or 0.0) / safe_duration, 0.0), 1.0)
+        x = start_x + (end_x - start_x) * progress
+        y = start_y + (end_y - start_y) * progress
+        return x, y
+
+    return motion_clip.with_position(position_at)
+
+
 def _render_clip_sync(
     image_path: str,
     audio_path: str,
@@ -78,7 +129,7 @@ def _render_clip_sync(
     resolution: tuple[int, int],
     subtitle_style: str,
 ) -> None:
-    image_clip = ImageClip(image_path).with_duration(duration).resized(new_size=resolution)
+    image_clip = _build_motion_image_clip(image_path=image_path, duration=duration, resolution=resolution)
     audio_clip = AudioFileClip(audio_path)
     base = image_clip.with_audio(audio_clip)
     subtitle = _subtitle_clip(text, duration, resolution, subtitle_style)
@@ -134,7 +185,7 @@ def _update_job(
     output_video_path: str | None = None,
     clip_paths: list[str] | None = None,
 ) -> None:
-    previews = []
+    previews: list[str] = []
     if clip_paths:
         previews = [f"{base_url}/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
     job_store.set(
@@ -152,13 +203,59 @@ def _update_job(
     )
 
 
+async def _resolve_segment_image(
+    payload: GenerateVideoRequest,
+    character: CharacterSuggestion,
+    segment_text: str,
+    prompt: str,
+    image_path: Path,
+    resolution: tuple[int, int],
+) -> tuple[Path, str]:
+    descriptor = build_scene_descriptor(character=character, segment_text=segment_text, prompt=prompt)
+
+    if payload.enable_scene_image_reuse:
+        matched = await find_reusable_scene_image(scene_descriptor=descriptor, model_id=payload.model_id)
+        if matched and matched.get("image_path"):
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                matched["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.info(
+                "Scene cache hit (%s): confidence=%.3f reason=%s",
+                matched.get("match_type"),
+                float(matched.get("confidence") or 0.0),
+                matched.get("reason") or "",
+            )
+            return reused, "cache"
+
+    generated = await use_reference_or_generate(
+        prompt=prompt,
+        output_path=image_path,
+        resolution=resolution,
+        reference_image_path=character.reference_image_path,
+    )
+
+    if payload.enable_scene_image_reuse:
+        try:
+            await run_in_threadpool(save_scene_image_cache_entry, descriptor, generated, prompt)
+        except Exception:
+            logger.exception("Failed to persist generated image into scene cache")
+
+    return generated, "generated"
+
+
 async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: str) -> None:
     temp_root = project_path(settings.temp_dir) / job_id
     clip_root = temp_root / "clips"
     clip_root.mkdir(parents=True, exist_ok=True)
 
+    if payload.enable_scene_image_reuse:
+        ensure_scene_cache_paths()
+
     try:
-        _update_job(job_id, base_url, "running", 0.05, "segment", "正在分段文本")
+        _update_job(job_id, base_url, "running", 0.05, "segment", "Segmenting text")
         segments, sentence_count = await _segment_text(payload)
         if payload.max_segment_groups > 0:
             segments = segments[: payload.max_segment_groups]
@@ -171,7 +268,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         for index, segment_text in enumerate(segments):
             if job_store.is_cancelled(job_id):
-                _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "任務已取消", clip_paths=clip_paths)
+                _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "Job cancelled", clip_paths=clip_paths)
                 return
 
             progress = 0.1 + (index / total) * 0.75
@@ -181,31 +278,35 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "running",
                 progress,
                 "render-segment",
-                f"正在生成第 {index + 1}/{total} 段（共 {sentence_count or '-'} 句）",
+                f"Rendering segment {index + 1}/{total} (sentences: {sentence_count or '-'})",
                 clip_paths=clip_paths,
             )
 
             character = _pick_character(payload.characters, segment_text)
-            prompt = f"{character.base_prompt or character.appearance or character.name}，{segment_text}"
+            prompt = f"{character.base_prompt or character.appearance or character.name}, {segment_text}"
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
             clip_path = clip_root / f"clip_{index:04d}.mp4"
 
             image_task = asyncio.create_task(
-                use_reference_or_generate(
+                _resolve_segment_image(
+                    payload=payload,
+                    character=character,
+                    segment_text=segment_text,
                     prompt=prompt,
-                    output_path=image_path,
+                    image_path=image_path,
                     resolution=resolution,
-                    reference_image_path=character.reference_image_path,
                 )
             )
             audio_task = asyncio.create_task(
                 synthesize_tts(text=segment_text, voice=character.voice_id, output_path=audio_path)
             )
 
-            image_result, audio_bundle = await asyncio.gather(image_task, audio_task)
+            image_bundle, audio_bundle = await asyncio.gather(image_task, audio_task)
+            image_result, image_source = image_bundle
             audio_result_path, duration = audio_bundle
+            logger.info("Segment %s image source: %s", index + 1, image_source)
 
             await run_in_threadpool(
                 _render_clip_sync,
@@ -221,17 +322,25 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             clip_paths.append(str(clip_path))
 
         if job_store.is_cancelled(job_id):
-            _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "任務已取消", clip_paths=clip_paths)
+            _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "Job cancelled", clip_paths=clip_paths)
             return
 
-        _update_job(job_id, base_url, "running", 0.9, "compose", "正在合成最終視頻", clip_paths=clip_paths)
+        _update_job(job_id, base_url, "running", 0.9, "compose", "Composing final video", clip_paths=clip_paths)
         output_root = project_path(settings.output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
         final_path = output_root / f"{job_id}.mp4"
         await run_in_threadpool(_render_final_sync, clip_paths, final_path, payload.fps)
 
         if job_store.is_cancelled(job_id):
-            _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "任务在合成阶段被取消", clip_paths=clip_paths)
+            _update_job(
+                job_id,
+                base_url,
+                "cancelled",
+                1.0,
+                "cancelled",
+                "Job cancelled during compose stage",
+                clip_paths=clip_paths,
+            )
             return
 
         _update_job(
@@ -240,20 +349,20 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             "completed",
             1.0,
             "done",
-            "視頻生成完成",
+            "Video generation completed",
             output_video_path=str(final_path),
             clip_paths=clip_paths,
         )
     except Exception as exc:
         logger.exception("Video job failed: %s", job_id)
-        _update_job(job_id, base_url, "failed", 1.0, "error", f"視頻生成失敗: {exc}")
+        _update_job(job_id, base_url, "failed", 1.0, "error", f"Video generation failed: {exc}")
     finally:
         job_store.clear_cancel(job_id)
 
 
 def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
     job_id = uuid4().hex
-    _update_job(job_id, base_url, "queued", 0.0, "queued", "任務已排隊")
+    _update_job(job_id, base_url, "queued", 0.0, "queued", "Job queued")
 
     def runner() -> None:
         asyncio.run(run_video_job(job_id=job_id, payload=payload, base_url=base_url))
@@ -274,7 +383,7 @@ def cancel_job(job_id: str, base_url: str) -> bool:
                 status="cancelled",
                 progress=current.progress,
                 step="cancelled",
-                message="已请求取消，稍后停止",
+                message="Cancel request accepted, stopping",
                 output_video_url=current.output_video_url,
                 output_video_path=current.output_video_path,
                 clip_count=current.clip_count,

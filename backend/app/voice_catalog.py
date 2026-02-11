@@ -4,30 +4,34 @@ from .models import VoiceInfo
 
 
 VOICE_INFOS: list[VoiceInfo] = [
-    VoiceInfo(id="zh-CN-YunxiNeural", name="雲希", gender="male", age="young", description="清晰穩重"),
-    VoiceInfo(id="zh-CN-YunyangNeural", name="雲揚", gender="male", age="young", description="活潑陽光"),
-    VoiceInfo(id="zh-CN-YunjianNeural", name="雲健", gender="male", age="middle", description="成熟威嚴"),
-    VoiceInfo(id="zh-CN-YunzeNeural", name="雲澤", gender="male", age="young", description="溫和親切"),
-    VoiceInfo(id="zh-CN-XiaoxiaoNeural", name="曉曉", gender="female", age="young", description="溫柔甜美"),
-    VoiceInfo(id="zh-CN-XiaoyiNeural", name="曉伊", gender="female", age="young", description="活潑可愛"),
-    VoiceInfo(id="zh-CN-XiaohanNeural", name="曉涵", gender="female", age="middle", description="優雅知性"),
-    VoiceInfo(id="zh-CN-XiaomengNeural", name="曉夢", gender="female", age="young", description="清純夢幻"),
-    VoiceInfo(id="zh-CN-XiaomoNeural", name="曉墨", gender="female", age="young", description="冷靜專業"),
-    VoiceInfo(id="zh-CN-XiaoruiNeural", name="曉睿", gender="female", age="young", description="聰慧機智"),
+    VoiceInfo(id="zh-CN-YunxiNeural", name="Yunxi", gender="male", age="young", description="Clear and steady"),
+    VoiceInfo(id="zh-CN-YunyangNeural", name="Yunyang", gender="male", age="young", description="Energetic and bright"),
+    VoiceInfo(id="zh-CN-YunjianNeural", name="Yunjian", gender="male", age="middle", description="Mature and authoritative"),
+    VoiceInfo(id="zh-CN-YunzeNeural", name="Yunze", gender="male", age="young", description="Warm and friendly"),
+    VoiceInfo(id="zh-CN-XiaoxiaoNeural", name="Xiaoxiao", gender="female", age="young", description="Soft and sweet"),
+    VoiceInfo(id="zh-CN-XiaoyiNeural", name="Xiaoyi", gender="female", age="young", description="Lively and cute"),
+    VoiceInfo(id="zh-CN-XiaohanNeural", name="Xiaohan", gender="female", age="middle", description="Elegant and calm"),
+    VoiceInfo(id="zh-CN-XiaomengNeural", name="Xiaomeng", gender="female", age="young", description="Dreamy and pure"),
+    VoiceInfo(id="zh-CN-XiaomoNeural", name="Xiaomo", gender="female", age="young", description="Cool and professional"),
+    VoiceInfo(id="zh-CN-XiaoruiNeural", name="Xiaorui", gender="female", age="young", description="Smart and sharp"),
 ]
 
 
 def recommend_voice(role_text: str, personality: str = "") -> str:
-    content = f"{role_text} {personality}"
-    if any(word in content for word in ["女", "少女", "公主", "女主"]):
-        if any(word in content for word in ["活潑", "可愛", "俏皮"]):
+    content = f"{role_text} {personality}".lower()
+
+    if any(word in content for word in ["female", "girl", "princess", "heroine", "woman"]):
+        if any(word in content for word in ["lively", "cute", "playful"]):
             return "zh-CN-XiaoyiNeural"
-        if any(word in content for word in ["冷", "理性", "專業"]):
+        if any(word in content for word in ["cold", "calm", "professional"]):
             return "zh-CN-XiaomoNeural"
         return "zh-CN-XiaoxiaoNeural"
-    if any(word in content for word in ["長者", "師父", "權威", "反派"]):
+
+    if any(word in content for word in ["elder", "mentor", "authority", "villain"]):
         return "zh-CN-YunjianNeural"
-    if any(word in content for word in ["少年", "熱血", "活力"]):
+
+    if any(word in content for word in ["young", "passionate", "active", "teen"]):
         return "zh-CN-YunyangNeural"
+
     return "zh-CN-YunxiNeural"
 

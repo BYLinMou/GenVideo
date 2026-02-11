@@ -8,6 +8,7 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - Sentence-based grouping semantics
 - Character reference-image library (select/upload/generate)
 - Per-character TTS voice selection from real voice list
+- Scene-image reuse cache with LLM text matching (cost reduction)
 
 ## Workflow (Current)
 
@@ -24,6 +25,8 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - `sentences_per_segment = N` means **N sentences per segment group**
 - One segment group generates one clip
 - One segment group generates one image prompt call (reference image is passed when available)
+- Before generating a new segment image, backend checks reusable cached images by structured text descriptor
+- Cache matching is text-only (character/action/scene descriptors), no image input required
 - `max_segment_groups = 0` means process all groups
 - `max_segment_groups = 2` with `sentences_per_segment = 5` means process up to `2 * 5 = 10` sentences
 
@@ -80,10 +83,17 @@ Important paths:
 - `OUTPUT_DIR`: final videos
 - `TEMP_DIR`: per-job clip assets
 - `CHARACTER_REF_DIR`: reusable character reference image library
+- `SCENE_CACHE_DIR`: generated scene-image cache files
+- `SCENE_CACHE_INDEX_PATH`: metadata index for scene-image reuse
 - `LOG_DIR`: backend log files
+
+Request field (generate video):
+
+- `enable_scene_image_reuse` (default `true`):
+  - `true`: try cache matching first, generate only if no suitable match
+  - `false`: always generate new image for each segment
 
 ## Notes
 
 - If LLM/image/TTS API partially fails, fallback paths are used where possible.
 - Backend exceptions are logged to `logs/backend.log` and can be viewed in frontend via `/api/logs/tail`.
-
