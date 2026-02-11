@@ -22,6 +22,7 @@ const zhCN = {
     imageAspectRatio: '图片比例（Poe）',
     subtitleStyle: '字幕样式',
     cameraMotion: '镜头运动',
+    renderMode: '渲染速度模式',
     fps: 'FPS',
     bgmEnabled: '启用背景音乐（BGM）',
     bgmVolume: '背景音乐音量',
@@ -54,6 +55,9 @@ const zhCN = {
     cameraMotionVertical: '上→下（推荐）',
     cameraMotionHorizontal: '左→右',
     cameraMotionAuto: '自动',
+    renderFast: '极速（推荐）',
+    renderBalanced: '均衡',
+    renderQuality: '高质量（较慢）',
     unavailable: '不可用'
   },
   action: {

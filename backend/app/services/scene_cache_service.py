@@ -275,9 +275,14 @@ def _parse_json_object(text: str) -> dict | None:
         return None
 
 
-def _text_match_verdict(target_descriptor: dict, candidate_entry: dict) -> tuple[bool, dict]:
-    target_profile = _build_match_profile(target_descriptor)
-    candidate_profile = _build_match_profile(candidate_entry.get("descriptor") or {})
+def _entry_match_profile(entry: dict) -> dict:
+    raw_profile = entry.get("match_profile")
+    if isinstance(raw_profile, dict) and int(raw_profile.get("schema_version") or 0) >= 2:
+        return raw_profile
+    return _build_match_profile(entry.get("descriptor") or {})
+
+
+def _text_match_verdict(target_profile: dict, candidate_profile: dict) -> tuple[bool, dict]:
 
     if not _character_match(target_profile, candidate_profile):
         return False, {"reject": "character_mismatch"}
@@ -432,7 +437,7 @@ def build_scene_descriptor(
 
 
 async def _llm_match_candidate(
-    target_descriptor: dict,
+    target_profile: dict,
     candidates: list[dict],
     model_id: str | None,
 ) -> tuple[str | None, str]:
@@ -441,7 +446,6 @@ async def _llm_match_candidate(
 
     url = f"{settings.llm_api_base_url.rstrip('/')}/chat/completions"
     model = model_id or settings.llm_default_model
-    target_profile = _build_match_profile(target_descriptor)
     prompt = {
         "task": "select_reusable_scene_image",
         "rules": [
@@ -548,6 +552,7 @@ async def find_reusable_scene_image(
         payload = _load_index_unlocked()
         entries = [item for item in payload.get("entries", []) if isinstance(item, dict)]
 
+    target_profile = _build_match_profile(target_descriptor)
     viable: list[dict] = []
     for entry in entries:
         entry_id = str(entry.get("id") or "")
@@ -561,12 +566,14 @@ async def find_reusable_scene_image(
         image_path = Path(migrated.get("image_path") or "")
         if not image_path.exists():
             continue
-        matched, details = _text_match_verdict(target_descriptor, migrated)
+        candidate_profile = _entry_match_profile(migrated)
+        matched, details = _text_match_verdict(target_profile, candidate_profile)
         if not matched:
             continue
         rank_key = int(details.get("rank_key", 0))
         enriched = {
             **migrated,
+            "match_profile": candidate_profile,
             "heuristic_score": float(rank_key),
             "score_details": details,
         }
@@ -580,16 +587,70 @@ async def find_reusable_scene_image(
         key=lambda item: int((item.get("score_details") or {}).get("rank_key", 0)),
         reverse=True,
     )
-    top = ranked[:8]
+    top = ranked[:5]
 
-    selected_id, reason = await _llm_match_candidate(target_descriptor, top, model_id=model_id)
+    exact_candidates: list[dict] = []
+    for item in top:
+        item_profile = _entry_match_profile(item)
+        same_action = _normalize_text(target_profile.get("action_hint", "")) and _normalize_text(
+            target_profile.get("action_hint", "")
+        ) == _normalize_text(item_profile.get("action_hint", ""))
+        target_location = _normalize_text(target_profile.get("location_hint", ""))
+        item_location = _normalize_text(item_profile.get("location_hint", ""))
+        same_location = (not target_location and not item_location) or (
+            target_location and item_location and target_location == item_location
+        )
+        if same_action and same_location:
+            exact_candidates.append(item)
+
+    if exact_candidates:
+        best_exact = sorted(
+            exact_candidates,
+            key=lambda item: int((item.get("score_details") or {}).get("rank_key", 0)),
+            reverse=True,
+        )[0]
+        return {
+            "image_path": str(best_exact["image_path"]),
+            "match_type": "text-exact",
+            "confidence": 1.0,
+            "reason": "exact action/location match",
+            "entry_id": best_exact.get("id"),
+        }
+
+    if len(top) == 1:
+        only = top[0]
+        only_profile = _entry_match_profile(only)
+        same_action = _normalize_text(target_profile.get("action_hint", "")) and _normalize_text(
+            target_profile.get("action_hint", "")
+        ) == _normalize_text(only_profile.get("action_hint", ""))
+        target_location = _normalize_text(target_profile.get("location_hint", ""))
+        only_location = _normalize_text(only_profile.get("location_hint", ""))
+        same_location = (not target_location and not only_location) or (
+            target_location and only_location and target_location == only_location
+        )
+        if same_action and same_location:
+            return {
+                "image_path": str(only["image_path"]),
+                "match_type": "text-exact",
+                "confidence": 1.0,
+                "reason": "single candidate exact action/location",
+                "entry_id": only.get("id"),
+            }
+
+    best_precheck = top[0].get("score_details") or {}
+    if not bool(best_precheck.get("exact_action", False)) and int(best_precheck.get("action_common", 0)) < 3:
+        return None
+    if int(best_precheck.get("scene_common", 0)) < 2 and int(best_precheck.get("scene_element_common", 0)) < 1:
+        return None
+
+    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id)
     if selected_id:
         selected = next((item for item in top if str(item.get("id")) == selected_id), None)
         if selected:
             return {
                 "image_path": str(selected["image_path"]),
                 "match_type": "llm",
-                "confidence": float(selected.get("heuristic_score", 0.0)),
+                "confidence": 0.9,
                 "reason": reason,
                 "entry_id": selected.get("id"),
             }
@@ -600,8 +661,7 @@ async def find_reusable_scene_image(
         return None
 
     # conservative text-only fallback: only when action/location text are exactly same
-    target_profile = _build_match_profile(target_descriptor)
-    best_profile = _build_match_profile(best.get("descriptor") or {})
+    best_profile = _entry_match_profile(best)
     same_action = _normalize_text(target_profile.get("action_hint", "")) and _normalize_text(
         target_profile.get("action_hint", "")
     ) == _normalize_text(best_profile.get("action_hint", ""))
@@ -614,7 +674,7 @@ async def find_reusable_scene_image(
         return {
             "image_path": str(best["image_path"]),
             "match_type": "text-exact",
-            "confidence": float(best.get("heuristic_score", 0.0)),
+            "confidence": 1.0,
             "reason": "exact action/location text match",
             "entry_id": best.get("id"),
         }

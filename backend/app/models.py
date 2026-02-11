@@ -105,6 +105,7 @@ class GenerateVideoRequest(BaseModel):
     model_id: str | None = None
     enable_scene_image_reuse: bool = True
     scene_reuse_no_repeat_window: int = Field(default=3, ge=0, le=100)
+    render_mode: Literal["fast", "balanced", "quality"] = "fast"
 
 
 class GenerateVideoResponse(BaseModel):

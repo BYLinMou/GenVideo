@@ -385,6 +385,7 @@ async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> 
         payload.fps or 30,
         payload.bgm_enabled,
         payload.bgm_volume,
+        "fast",
     )
 
     base_url = str(request.base_url).rstrip("/")

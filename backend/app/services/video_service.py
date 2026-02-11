@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 from collections import deque
 from threading import Thread
@@ -36,6 +39,38 @@ logger = logging.getLogger(__name__)
 
 _SUBTITLE_FONT_RESOLVED = False
 _SUBTITLE_FONT_PATH: str | None = None
+
+_VIDEO_AUDIO_BITRATE = "96k"
+
+
+def _resolve_render_profile(mode: str | None) -> dict:
+    key = (mode or "").strip().lower()
+    if key == "quality":
+        return {
+            "clip_preset": "medium",
+            "clip_crf": "22",
+            "final_preset": "medium",
+            "final_crf": "23",
+            "clip_fps": None,
+            "bgm_video_copy": False,
+        }
+    if key == "balanced":
+        return {
+            "clip_preset": "veryfast",
+            "clip_crf": "25",
+            "final_preset": "veryfast",
+            "final_crf": "26",
+            "clip_fps": None,
+            "bgm_video_copy": True,
+        }
+    return {
+        "clip_preset": "ultrafast",
+        "clip_crf": "29",
+        "final_preset": "veryfast",
+        "final_crf": "30",
+        "clip_fps": None,
+        "bgm_video_copy": True,
+    }
 
 
 def _parse_resolution(value: str) -> tuple[int, int]:
@@ -300,7 +335,10 @@ def _render_clip_sync(
     resolution: tuple[int, int],
     subtitle_style: str,
     camera_motion: str,
+    render_mode: str,
 ) -> None:
+    profile = _resolve_render_profile(render_mode)
+    clip_fps = int(profile.get("clip_fps") or fps)
     image_clip = _build_motion_image_clip(
         image_path=image_path,
         duration=duration,
@@ -313,7 +351,15 @@ def _render_clip_sync(
     composed = CompositeVideoClip([base, *subtitle_clips], size=resolution).with_duration(duration)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    composed.write_videofile(str(output_path), fps=fps, audio_codec="aac", codec="libx264", logger=None)
+    composed.write_videofile(
+        str(output_path),
+        fps=clip_fps,
+        audio_codec="aac",
+        codec="libx264",
+        preset=str(profile.get("clip_preset") or "veryfast"),
+        ffmpeg_params=["-crf", str(profile.get("clip_crf") or "27"), "-movflags", "+faststart", "-b:a", _VIDEO_AUDIO_BITRATE],
+        logger=None,
+    )
 
     composed.close()
     for subtitle in subtitle_clips:
@@ -329,7 +375,123 @@ def _render_final_sync(
     fps: int,
     bgm_enabled: bool,
     bgm_volume: float,
+    render_mode: str,
 ) -> None:
+    profile = _resolve_render_profile(render_mode)
+    final_preset = str(profile.get("final_preset") or "veryfast")
+    final_crf = str(profile.get("final_crf") or "28")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if ffmpeg_bin and clip_paths:
+        with tempfile.TemporaryDirectory(prefix="genvideo_concat_") as tmp_dir:
+            concat_file = Path(tmp_dir) / "concat_list.txt"
+            concat_lines = []
+            for clip_path in clip_paths:
+                escaped = str(Path(clip_path).resolve()).replace("'", "'\\''")
+                concat_lines.append(f"file '{escaped}'")
+            concat_file.write_text("\n".join(concat_lines), encoding="utf-8")
+
+            merged_no_bgm = Path(tmp_dir) / "merged_no_bgm.mp4"
+            concat_cmd = [
+                ffmpeg_bin,
+                "-y",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-f",
+                "concat",
+                "-safe",
+                "0",
+                "-i",
+                str(concat_file),
+                "-c",
+                "copy",
+                str(merged_no_bgm),
+            ]
+            concat_proc = subprocess.run(concat_cmd, capture_output=True, text=True)
+            if concat_proc.returncode == 0 and merged_no_bgm.exists():
+                bgm_enabled = bool(bgm_enabled)
+                bgm_volume = max(0.0, min(float(bgm_volume), 1.0))
+                bgm_path = project_path("assets/bgm.mp3")
+                if not bgm_path.exists():
+                    bgm_path = project_path("assets/bgm/happinessinmusic-rock-trailer-417598.mp3")
+
+                if bgm_enabled and bgm_volume > 0 and bgm_path.exists():
+                    if bool(profile.get("bgm_video_copy", True)):
+                        mix_cmd = [
+                            ffmpeg_bin,
+                            "-y",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            str(merged_no_bgm),
+                            "-stream_loop",
+                            "-1",
+                            "-i",
+                            str(bgm_path),
+                            "-filter_complex",
+                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[mix]",
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "[mix]",
+                            "-c:v",
+                            "copy",
+                            "-c:a",
+                            "aac",
+                            "-b:a",
+                            _VIDEO_AUDIO_BITRATE,
+                            "-movflags",
+                            "+faststart",
+                            str(output_path),
+                        ]
+                    else:
+                        mix_cmd = [
+                            ffmpeg_bin,
+                            "-y",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
+                            "-i",
+                            str(merged_no_bgm),
+                            "-stream_loop",
+                            "-1",
+                            "-i",
+                            str(bgm_path),
+                            "-filter_complex",
+                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[mix]",
+                            "-map",
+                            "0:v:0",
+                            "-map",
+                            "[mix]",
+                            "-c:v",
+                            "libx264",
+                            "-preset",
+                            final_preset,
+                            "-crf",
+                            final_crf,
+                            "-c:a",
+                            "aac",
+                            "-b:a",
+                            _VIDEO_AUDIO_BITRATE,
+                            "-movflags",
+                            "+faststart",
+                            str(output_path),
+                        ]
+                    mix_proc = subprocess.run(mix_cmd, capture_output=True, text=True)
+                    if mix_proc.returncode == 0 and output_path.exists():
+                        logger.info("Final compose via ffmpeg concat+bgm mix")
+                        return
+                    logger.warning("ffmpeg bgm mix failed, fallback to python compose: %s", (mix_proc.stderr or "")[:400])
+                else:
+                    shutil.copyfile(merged_no_bgm, output_path)
+                    logger.info("Final compose via ffmpeg concat copy")
+                    return
+            else:
+                logger.warning("ffmpeg concat copy failed, fallback to python compose: %s", (concat_proc.stderr or "")[:400])
+
     video_clips = []
     bgm_clips = []
     final = None
@@ -369,8 +531,15 @@ def _render_final_sync(
                 logger.warning("BGM file does not exist, skip mixing: %s", bgm_path)
 
         final_output = final_with_audio or final
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        final_output.write_videofile(str(output_path), fps=fps, audio_codec="aac", codec="libx264", logger=None)
+        final_output.write_videofile(
+            str(output_path),
+            fps=fps,
+            audio_codec="aac",
+            codec="libx264",
+            preset=final_preset,
+            ffmpeg_params=["-crf", final_crf, "-movflags", "+faststart", "-b:a", _VIDEO_AUDIO_BITRATE],
+            logger=None,
+        )
     finally:
         if final_with_audio is not None:
             final_with_audio.close()
@@ -574,6 +743,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 resolution,
                 payload.subtitle_style,
                 payload.camera_motion,
+                payload.render_mode,
             )
             clip_paths.append(str(clip_path))
 
@@ -592,6 +762,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             payload.fps,
             payload.bgm_enabled,
             payload.bgm_volume,
+            payload.render_mode,
         )
 
         if job_store.is_cancelled(job_id):

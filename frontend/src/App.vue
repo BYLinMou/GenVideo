@@ -34,6 +34,7 @@ const form = reactive({
   subtitle_style: 'white_black',
   camera_motion: 'vertical',
   fps: 30,
+  render_mode: 'fast',
   bgm_enabled: true,
   bgm_volume: 0.12,
   enable_scene_image_reuse: true,
@@ -606,6 +607,7 @@ async function runGenerate() {
       subtitle_style: form.subtitle_style,
       camera_motion: form.camera_motion,
       fps: form.fps,
+      render_mode: form.render_mode,
       bgm_enabled: form.bgm_enabled,
       bgm_volume: form.bgm_volume,
       model_id: selectedModel.value || null,
@@ -934,6 +936,15 @@ onUnmounted(() => {
             <el-option :label="t('option.cameraMotionVertical')" value="vertical" />
             <el-option :label="t('option.cameraMotionHorizontal')" value="horizontal" />
             <el-option :label="t('option.cameraMotionAuto')" value="auto" />
+          </el-select>
+        </div>
+
+        <div>
+          <label>{{ t('field.renderMode') }}</label>
+          <el-select v-model="form.render_mode" style="width: 100%">
+            <el-option :label="t('option.renderFast')" value="fast" />
+            <el-option :label="t('option.renderBalanced')" value="balanced" />
+            <el-option :label="t('option.renderQuality')" value="quality" />
           </el-select>
         </div>
 
