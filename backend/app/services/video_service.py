@@ -16,7 +16,7 @@ from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
 from ..state import job_store
 from .image_service import use_reference_or_generate
 from .llm_service import (
-    build_segment_image_prompt,
+    build_segment_image_bundle,
     group_sentences,
     segment_by_fixed,
     segment_by_smart,
@@ -429,11 +429,17 @@ async def _resolve_segment_image(
     character: CharacterSuggestion,
     segment_text: str,
     prompt: str,
+    scene_metadata: dict,
     image_path: Path,
     resolution: tuple[int, int],
     recent_reuse_entry_ids: set[str] | None = None,
 ) -> tuple[Path, str, str | None]:
-    descriptor = build_scene_descriptor(character=character, segment_text=segment_text, prompt=prompt)
+    descriptor = build_scene_descriptor(
+        character=character,
+        segment_text=segment_text,
+        prompt=prompt,
+        metadata=scene_metadata,
+    )
 
     if payload.enable_scene_image_reuse:
         matched = await find_reusable_scene_image(
@@ -521,7 +527,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             clip_path = clip_root / f"clip_{index:04d}.mp4"
 
             prompt_task = asyncio.create_task(
-                build_segment_image_prompt(
+                build_segment_image_bundle(
                     character=character,
                     segment_text=segment_text,
                     model_id=payload.model_id,
@@ -531,7 +537,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 synthesize_tts(text=segment_text, voice=character.voice_id, output_path=audio_path)
             )
 
-            prompt = await prompt_task
+            prompt_bundle = await prompt_task
+            prompt = str(prompt_bundle.get("prompt") or "").strip()
+            scene_metadata = prompt_bundle.get("metadata") or {}
 
             image_task = asyncio.create_task(
                 _resolve_segment_image(
@@ -539,6 +547,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     character=character,
                     segment_text=segment_text,
                     prompt=prompt,
+                    scene_metadata=scene_metadata,
                     image_path=image_path,
                     resolution=resolution,
                     recent_reuse_entry_ids=set(recent_scene_entry_ids),

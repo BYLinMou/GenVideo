@@ -207,6 +207,94 @@ def _clean_text(value: str | None, limit: int) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()[:limit]
 
 
+def _normalize_keyword_list(values: object, limit: int) -> list[str]:
+    if isinstance(values, str):
+        parts = re.split(r"[,，;；|/]", values)
+    elif isinstance(values, list):
+        parts = [str(item) for item in values]
+    else:
+        parts = []
+
+    output: list[str] = []
+    seen: set[str] = set()
+    for raw in parts:
+        item = _clean_text(str(raw), 80)
+        if not item:
+            continue
+        lowered = item.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        output.append(item)
+        if len(output) >= limit:
+            break
+    return output
+
+
+def _normalize_scene_metadata(raw: dict | None) -> dict:
+    payload = raw or {}
+    action_hint = _clean_text(str(payload.get("action_hint", "")), 220)
+    location_hint = _clean_text(str(payload.get("location_hint", "")), 220)
+    scene_elements = _normalize_keyword_list(payload.get("scene_elements") or payload.get("visual_elements") or [], 10)
+    action_keywords = _normalize_keyword_list(payload.get("action_keywords") or [], 10)
+    location_keywords = _normalize_keyword_list(payload.get("location_keywords") or [], 8)
+    mood = _clean_text(str(payload.get("mood", "")), 80)
+    shot_type = _clean_text(str(payload.get("shot_type", "")), 80)
+
+    return {
+        "action_hint": action_hint,
+        "location_hint": location_hint,
+        "scene_elements": scene_elements,
+        "action_keywords": action_keywords,
+        "location_keywords": location_keywords,
+        "mood": mood,
+        "shot_type": shot_type,
+    }
+
+
+def _fallback_scene_metadata(segment_text: str, image_prompt: str) -> dict:
+    text = _clean_text(segment_text, 1800)
+    prompt_text = _clean_text(image_prompt, 1800)
+    source = f"{text} {prompt_text}".strip()
+    pieces = [piece.strip() for piece in re.split(r"[。！？；，,!?;]", source) if piece.strip()]
+    action_hint = pieces[0] if pieces else source[:220]
+
+    location_hint = ""
+    location_markers = ["在", "于", "到", "来到", "进入", "教室", "街", "学校", "公园", "森林", "办公室", "家", "医院", "车站"]
+    for part in pieces[1:]:
+        if any(marker in part for marker in location_markers):
+            location_hint = part
+            break
+
+    keyword_source = _clean_text(source, 2400)
+    raw_tokens = re.split(r"[^\w\u4e00-\u9fff]+", keyword_source)
+    scene_elements: list[str] = []
+    seen: set[str] = set()
+    for token in raw_tokens:
+        token = _clean_text(token, 40)
+        if len(token) < 2:
+            continue
+        lowered = token.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        scene_elements.append(token)
+        if len(scene_elements) >= 8:
+            break
+
+    return _normalize_scene_metadata(
+        {
+            "action_hint": action_hint,
+            "location_hint": location_hint,
+            "scene_elements": scene_elements,
+            "action_keywords": scene_elements[:6],
+            "location_keywords": [location_hint] if location_hint else [],
+            "mood": "",
+            "shot_type": "",
+        }
+    )
+
+
 def _character_identity_guard(character: CharacterSuggestion) -> str:
     name = _clean_text(character.name, 80) or "main character"
     appearance = _clean_text(character.appearance, 500)
@@ -249,25 +337,38 @@ def _fallback_segment_image_prompt(character: CharacterSuggestion, segment_text:
     )
 
 
-async def build_segment_image_prompt(
+def _fallback_segment_image_bundle(character: CharacterSuggestion, segment_text: str) -> dict:
+    prompt = _fallback_segment_image_prompt(character, segment_text)
+    return {
+        "prompt": prompt,
+        "metadata": _fallback_scene_metadata(segment_text, prompt),
+    }
+
+
+async def build_segment_image_bundle(
     character: CharacterSuggestion,
     segment_text: str,
     model_id: str | None,
-) -> str:
-    fallback = _fallback_segment_image_prompt(character, segment_text)
+) -> dict:
+    fallback_bundle = _fallback_segment_image_bundle(character, segment_text)
+    fallback_prompt = fallback_bundle["prompt"]
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
     if not settings.llm_api_key:
-        return fallback
+        return fallback_bundle
 
     selected_model = model_id or settings.llm_default_model
-    prompt = {
+    request_body = {
         "task": "build_image_prompt_for_story_segment",
         "rules": [
             "Keep character identity highly consistent across scenes.",
             "Reference image (if present) is for character look only, never for scene/background.",
             "Scene/background/action must be inferred from current segment text.",
             "Output one concise production-ready prompt in English.",
+            "Also output strict scene metadata for cache-reuse matching.",
+            "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
+            "Location must be concrete place if present (e.g. classroom, corridor, street).",
+            "Scene elements must be concrete visual nouns/background details.",
             "No markdown, no explanation.",
         ],
         "character": {
@@ -278,13 +379,22 @@ async def build_segment_image_prompt(
             "has_reference_image": bool(character.reference_image_path),
         },
         "current_segment": _clean_text(segment_text, 1800),
-        "output_schema": {"prompt": ""},
+        "output_schema": {
+            "prompt": "",
+            "action_hint": "",
+            "location_hint": "",
+            "scene_elements": [""],
+            "action_keywords": [""],
+            "location_keywords": [""],
+            "mood": "",
+            "shot_type": "",
+        },
     }
     payload = {
         "model": selected_model,
         "messages": [
             {"role": "system", "content": "You are a strict JSON generator."},
-            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+            {"role": "user", "content": json.dumps(request_body, ensure_ascii=False)},
         ],
         "temperature": 0.15,
     }
@@ -302,16 +412,38 @@ async def build_segment_image_prompt(
             parsed = _extract_json_object(content)
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
-                return (
+                final_prompt = (
                     f"{guard} "
                     f"Current plot segment: {scene_text}. "
                     "Scene/background/action must follow current plot segment. "
                     f"Additional style and composition details: {candidate}"
                 )
+                metadata = _normalize_scene_metadata(parsed)
+                if not metadata.get("action_hint"):
+                    metadata["action_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("action_hint", "")
+                if not metadata.get("location_hint"):
+                    metadata["location_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("location_hint", "")
+                return {
+                    "prompt": final_prompt,
+                    "metadata": metadata,
+                }
     except Exception:
-        logger.exception("LLM image prompt build failed, using fallback prompt")
+        logger.exception("LLM image prompt/metadata build failed, using fallback bundle")
 
-    return fallback
+    return fallback_bundle
+
+
+async def build_segment_image_prompt(
+    character: CharacterSuggestion,
+    segment_text: str,
+    model_id: str | None,
+) -> str:
+    bundle = await build_segment_image_bundle(
+        character=character,
+        segment_text=segment_text,
+        model_id=model_id,
+    )
+    return _clean_text(str(bundle.get("prompt", "")), 2600) or _fallback_segment_image_prompt(character, segment_text)
 
 
 def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
