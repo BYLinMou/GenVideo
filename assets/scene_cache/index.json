@@ -9801,6 +9801,493 @@
         ],
         "scene_summary": "high school classroom | holding a textbook with right hand"
       }
+    },
+    {
+      "id": "06926d50908741b4855b2ea99bae1f75",
+      "created_at": "2026-02-11T15:16:47.873719+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_151647_d7d8f9ae.png",
+      "prompt": "dimly lit urban alley | tightening grip on fruit knife while his eyes reflect swirling blood-red text",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tightening grip on fruit knife while his eyes reflect swirling blood-red text",
+        "location_hint": "dimly lit urban alley",
+        "segment_text": "血色文字如同弹幕一般，不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉，而是他的「死亡警告」.罗严并不属于这个世界。",
+        "scene_elements": [
+          "blood-red floating characters",
+          "dark alley walls",
+          "rain-soaked pavement",
+          "neon graffiti",
+          "shadowy mist"
+        ],
+        "action_keywords": [
+          "tightening grip",
+          "gazing",
+          "holding knife"
+        ],
+        "location_keywords": [
+          "urban alley",
+          "dark alley",
+          "rain-soaked pavement"
+        ],
+        "mood": "ominous, surreal, dread",
+        "shot_type": "extreme close-up"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tightening grip on fruit knife while his eyes reflect swirling blood-red text",
+        "location_hint": "dimly lit urban alley",
+        "segment_text": "血色文字如同弹幕一般，不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉，而是他的「死亡警告」.罗严并不属于这个世界。",
+        "scene_elements": [
+          "blood-red floating characters",
+          "dark alley walls",
+          "rain-soaked pavement",
+          "neon graffiti",
+          "shadowy mist"
+        ],
+        "action_keywords": [
+          "tightening grip",
+          "gazing",
+          "holding knife"
+        ],
+        "location_keywords": [
+          "urban alley",
+          "dark alley",
+          "rain-soaked pavement"
+        ],
+        "mood": "ominous, surreal, dread",
+        "shot_type": "extreme close-up",
+        "action_tokens": [
+          "tightening",
+          "grip",
+          "on",
+          "fruit",
+          "knife",
+          "while",
+          "his",
+          "eyes",
+          "reflect",
+          "swirling",
+          "blood",
+          "red",
+          "text",
+          "gazing",
+          "holding",
+          "血色文字如同弹幕一般",
+          "不断在他的眼眶里面跳跃",
+          "这并不是他饿昏头而看见的幻觉",
+          "而是他的",
+          "死亡警告",
+          "罗严并不属于这个世界"
+        ],
+        "location_tokens": [
+          "dimly",
+          "lit",
+          "urban",
+          "alley",
+          "dark",
+          "rain",
+          "soaked",
+          "pavement"
+        ],
+        "scene_tokens": [
+          "血色文字如同弹幕一般",
+          "不断在他的眼眶里面跳跃",
+          "这并不是他饿昏头而看见的幻觉",
+          "而是他的",
+          "死亡警告",
+          "罗严并不属于这个世界",
+          "blood",
+          "red",
+          "floating",
+          "characters",
+          "dark",
+          "alley",
+          "walls",
+          "rain",
+          "soaked",
+          "pavement",
+          "neon",
+          "graffiti",
+          "shadowy",
+          "mist",
+          "ominous",
+          "surreal",
+          "dread",
+          "extreme",
+          "close",
+          "up"
+        ],
+        "scene_summary": "dimly lit urban alley | tightening grip on fruit knife while his eyes reflect swirling blood-red text"
+      }
+    },
+    {
+      "id": "1bbc3c20fac34108802c44197a31f92e",
+      "created_at": "2026-02-11T15:22:49.924013+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_152249_10771825.png",
+      "prompt": "Rundown living room with gambling paraphernalia | Holding fruit knife, staring at family photo",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "Holding fruit knife, staring at family photo",
+        "location_hint": "Rundown living room with gambling paraphernalia",
+        "segment_text": "只知道了原主的少许家庭背景.年少时，一场意外带走了他的母亲。他的父亲因此自暴自弃，整日沉溺于赌博之中，",
+        "scene_elements": [
+          "worn sofa",
+          "small table",
+          "gambling chips",
+          "half‑empty bottle",
+          "faded family photograph",
+          "dim lamp",
+          "cracked wall"
+        ],
+        "action_keywords": [
+          "gripping fruit knife",
+          "staring",
+          "standing"
+        ],
+        "location_keywords": [
+          "living room",
+          "gambling table",
+          "family photo wall"
+        ],
+        "mood": "somber, melancholic, foreboding",
+        "shot_type": "medium close-up"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "Holding fruit knife, staring at family photo",
+        "location_hint": "Rundown living room with gambling paraphernalia",
+        "segment_text": "只知道了原主的少许家庭背景.年少时，一场意外带走了他的母亲。他的父亲因此自暴自弃，整日沉溺于赌博之中，",
+        "scene_elements": [
+          "worn sofa",
+          "small table",
+          "gambling chips",
+          "half‑empty bottle",
+          "faded family photograph",
+          "dim lamp",
+          "cracked wall"
+        ],
+        "action_keywords": [
+          "gripping fruit knife",
+          "staring",
+          "standing"
+        ],
+        "location_keywords": [
+          "living room",
+          "gambling table",
+          "family photo wall"
+        ],
+        "mood": "somber, melancholic, foreboding",
+        "shot_type": "medium close-up",
+        "action_tokens": [
+          "holding",
+          "fruit",
+          "knife",
+          "staring",
+          "at",
+          "family",
+          "photo",
+          "gripping",
+          "standing",
+          "只知道了原主的少许家庭背景",
+          "年少时",
+          "一场意外带走了他的母亲",
+          "他的父亲因此自暴自弃",
+          "整日沉溺于赌博之中"
+        ],
+        "location_tokens": [
+          "rundown",
+          "living",
+          "room",
+          "with",
+          "gambling",
+          "paraphernalia",
+          "table",
+          "family",
+          "photo",
+          "wall"
+        ],
+        "scene_tokens": [
+          "只知道了原主的少许家庭背景",
+          "年少时",
+          "一场意外带走了他的母亲",
+          "他的父亲因此自暴自弃",
+          "整日沉溺于赌博之中",
+          "worn",
+          "sofa",
+          "small",
+          "table",
+          "gambling",
+          "chips",
+          "half",
+          "empty",
+          "bottle",
+          "faded",
+          "family",
+          "photograph",
+          "dim",
+          "lamp",
+          "cracked",
+          "wall",
+          "somber",
+          "melancholic",
+          "foreboding",
+          "medium",
+          "close",
+          "up"
+        ],
+        "scene_summary": "Rundown living room with gambling paraphernalia | Holding fruit knife, staring at family photo"
+      }
+    },
+    {
+      "id": "b68c626115bb4324a61d2710c315ccd2",
+      "created_at": "2026-02-11T15:26:28.114463+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_152628_eaf6a6f2.png",
+      "prompt": "dark alley with wet cobblestones and flickering streetlight | tightening grip on fruit knife, staring emptily, jaw clenched",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tightening grip on fruit knife, staring emptily, jaw clenched",
+        "location_hint": "dark alley with wet cobblestones and flickering streetlight",
+        "segment_text": "罗严不是人类了.刚刚穿越过来的罗严，发现自己整日整夜被饥饿感所笼罩，无论吃了多少美味的食物，也始终填饱不了那无底洞一般的胃。",
+        "scene_elements": [
+          "dimly lit alley",
+          "wet cobblestones",
+          "flickering streetlight",
+          "shadowy walls"
+        ],
+        "action_keywords": [
+          "tightening grip",
+          "holding fruit knife",
+          "staring"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "cobblestones",
+          "streetlight"
+        ],
+        "mood": "foreboding, desperate hunger",
+        "shot_type": "medium close-up"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tightening grip on fruit knife, staring emptily, jaw clenched",
+        "location_hint": "dark alley with wet cobblestones and flickering streetlight",
+        "segment_text": "罗严不是人类了.刚刚穿越过来的罗严，发现自己整日整夜被饥饿感所笼罩，无论吃了多少美味的食物，也始终填饱不了那无底洞一般的胃。",
+        "scene_elements": [
+          "dimly lit alley",
+          "wet cobblestones",
+          "flickering streetlight",
+          "shadowy walls"
+        ],
+        "action_keywords": [
+          "tightening grip",
+          "holding fruit knife",
+          "staring"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "cobblestones",
+          "streetlight"
+        ],
+        "mood": "foreboding, desperate hunger",
+        "shot_type": "medium close-up",
+        "action_tokens": [
+          "tightening",
+          "grip",
+          "on",
+          "fruit",
+          "knife",
+          "staring",
+          "emptily",
+          "jaw",
+          "clenched",
+          "holding",
+          "罗严不是人类了",
+          "刚刚穿越过来的罗严",
+          "发现自己整日整夜被饥饿感所笼罩",
+          "无论吃了多少美味的食物",
+          "也始终填饱不了那无底洞一般的胃"
+        ],
+        "location_tokens": [
+          "dark",
+          "alley",
+          "with",
+          "wet",
+          "cobblestones",
+          "and",
+          "flickering",
+          "streetlight"
+        ],
+        "scene_tokens": [
+          "罗严不是人类了",
+          "刚刚穿越过来的罗严",
+          "发现自己整日整夜被饥饿感所笼罩",
+          "无论吃了多少美味的食物",
+          "也始终填饱不了那无底洞一般的胃",
+          "dimly",
+          "lit",
+          "alley",
+          "wet",
+          "cobblestones",
+          "flickering",
+          "streetlight",
+          "shadowy",
+          "walls",
+          "foreboding",
+          "desperate",
+          "hunger",
+          "medium",
+          "close",
+          "up"
+        ],
+        "scene_summary": "dark alley with wet cobblestones and flickering streetlight | tightening grip on fruit knife, staring emptily, jaw clenched"
+      }
+    },
+    {
+      "id": "3e51f8f852004eed8920b12453f2a814",
+      "created_at": "2026-02-11T15:27:52.615403+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_152752_cae98ed5.png",
+      "prompt": "dimly lit narrow alley, rain-soaked pavement, graffiti-covered walls | gripping fruit knife, staring at human silhouette with predatory gaze",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "gripping fruit knife, staring at human silhouette with predatory gaze",
+        "location_hint": "dimly lit narrow alley, rain-soaked pavement, graffiti-covered walls",
+        "segment_text": "罗严发现，他对人类的食物没有丝毫的兴趣，反而对人类抱有食欲，而且失去了对人类的同情心，甚至连性格都变得更谨慎和冷血！",
+        "scene_elements": [
+          "thin black coat",
+          "cuffs pulled to wrists",
+          "fruit knife",
+          "black-pupil eyes",
+          "rain-soaked pavement",
+          "graffiti-covered walls",
+          "human silhouette"
+        ],
+        "action_keywords": [
+          "gripping knife",
+          "staring",
+          "predatory gaze"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "narrow alley",
+          "rain-soaked pavement"
+        ],
+        "mood": "cold, predatory, tense",
+        "shot_type": "medium close-up"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "gripping fruit knife, staring at human silhouette with predatory gaze",
+        "location_hint": "dimly lit narrow alley, rain-soaked pavement, graffiti-covered walls",
+        "segment_text": "罗严发现，他对人类的食物没有丝毫的兴趣，反而对人类抱有食欲，而且失去了对人类的同情心，甚至连性格都变得更谨慎和冷血！",
+        "scene_elements": [
+          "thin black coat",
+          "cuffs pulled to wrists",
+          "fruit knife",
+          "black-pupil eyes",
+          "rain-soaked pavement",
+          "graffiti-covered walls",
+          "human silhouette"
+        ],
+        "action_keywords": [
+          "gripping knife",
+          "staring",
+          "predatory gaze"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "narrow alley",
+          "rain-soaked pavement"
+        ],
+        "mood": "cold, predatory, tense",
+        "shot_type": "medium close-up",
+        "action_tokens": [
+          "gripping",
+          "fruit",
+          "knife",
+          "staring",
+          "at",
+          "human",
+          "silhouette",
+          "with",
+          "predatory",
+          "gaze",
+          "罗严发现",
+          "他对人类的食物没有丝毫的兴趣",
+          "反而对人类抱有食欲",
+          "而且失去了对人类的同情心",
+          "甚至连性格都变得更谨慎和冷血"
+        ],
+        "location_tokens": [
+          "dimly",
+          "lit",
+          "narrow",
+          "alley",
+          "rain",
+          "soaked",
+          "pavement",
+          "graffiti",
+          "covered",
+          "walls",
+          "dark"
+        ],
+        "scene_tokens": [
+          "罗严发现",
+          "他对人类的食物没有丝毫的兴趣",
+          "反而对人类抱有食欲",
+          "而且失去了对人类的同情心",
+          "甚至连性格都变得更谨慎和冷血",
+          "thin",
+          "black",
+          "coat",
+          "cuffs",
+          "pulled",
+          "to",
+          "wrists",
+          "fruit",
+          "knife",
+          "pupil",
+          "eyes",
+          "rain",
+          "soaked",
+          "pavement",
+          "graffiti",
+          "covered",
+          "walls",
+          "human",
+          "silhouette",
+          "cold",
+          "predatory",
+          "tense",
+          "medium",
+          "close",
+          "up"
+        ],
+        "scene_summary": "dimly lit narrow alley, rain-soaked pavement, graffiti-covered walls | gripping fruit knife, staring at human silhouette with predatory gaze"
+      }
     }
   ]
 }

@@ -43,6 +43,7 @@ _SUBTITLE_FONT_PATH: str | None = None
 
 _VIDEO_AUDIO_BITRATE = "96k"
 _TTS_GAIN = 1.15
+_FINAL_AUDIO_GAIN = 3.0
 _NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
 _DIALOG_QUOTE_PAIRS = {
     '"': '"',
@@ -408,15 +409,12 @@ def _subtitle_timeline(text: str, duration: float) -> list[tuple[str, float, flo
 
 def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], style: str) -> list[TextClip]:
     width, height = resolution
-    fontsize = 56 if style == "center" else 46
+    fontsize = 46
     color = "#FFFFFF"
     stroke_color = "#111111"
-    y_pos = int(height * 0.78)
-
     if style == "center":
-        y_pos = int(height * 0.45)
+        fontsize = 56
     elif style == "danmaku":
-        y_pos = int(height * 0.15)
         fontsize = 38
 
     if style in {"highlight", "yellow_black"}:
@@ -431,6 +429,29 @@ def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], sty
 
     font_path = _subtitle_font_path()
     subtitles: list[TextClip] = []
+
+    safe_top = max(12, int(height * 0.03))
+    safe_bottom = max(24, int(height * 0.06))
+
+    if style == "center":
+        subtitle_box_h = max(120, int(height * 0.30))
+    elif style == "danmaku":
+        subtitle_box_h = max(90, int(height * 0.16))
+    else:
+        subtitle_box_h = max(110, int(height * 0.20))
+
+    def _resolve_y(clip_h: int) -> int:
+        clip_height = max(1, int(clip_h or 1))
+        if style == "center":
+            preferred = int((height - clip_height) * 0.5)
+        elif style == "danmaku":
+            preferred = int(height * 0.18)
+        else:
+            preferred = int(height * 0.78)
+
+        max_y = max(safe_top, height - clip_height - safe_bottom)
+        return min(max(preferred, safe_top), max_y)
+
     for sentence, start_at, end_at in _subtitle_timeline(text, duration):
         text_kwargs = {
             "text": sentence,
@@ -439,7 +460,12 @@ def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], sty
             "stroke_color": stroke_color,
             "stroke_width": 2,
             "method": "caption",
-            "size": (width - 120, None),
+            "size": (width - 120, subtitle_box_h),
+            "margin": (10, 18),
+            "interline": max(6, int(fontsize * 0.22)),
+            "text_align": "center",
+            "horizontal_align": "center",
+            "vertical_align": "center",
         }
         if font_path:
             text_kwargs["font"] = font_path
@@ -458,9 +484,8 @@ def _subtitle_clips(text: str, duration: float, resolution: tuple[int, int], sty
                 logger.exception("Subtitle render failed after retry")
                 continue
 
-        subtitles.append(
-            clip.with_start(start_at).with_duration(max(0.05, end_at - start_at)).with_position(("center", y_pos))
-        )
+        y_pos = _resolve_y(getattr(clip, "h", 0))
+        subtitles.append(clip.with_start(start_at).with_duration(max(0.05, end_at - start_at)).with_position(("center", y_pos)))
 
     return subtitles
 
@@ -636,7 +661,7 @@ def _render_final_sync(
                             "-i",
                             str(bgm_path),
                             "-filter_complex",
-                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[mix]",
+                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[tmp];[tmp]volume={_FINAL_AUDIO_GAIN}[mix]",
                             "-map",
                             "0:v:0",
                             "-map",
@@ -665,7 +690,7 @@ def _render_final_sync(
                             "-i",
                             str(bgm_path),
                             "-filter_complex",
-                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[mix]",
+                            f"[1:a]volume={bgm_volume}[bgm];[0:a][bgm]amix=inputs=2:duration=first:dropout_transition=0[tmp];[tmp]volume={_FINAL_AUDIO_GAIN}[mix]",
                             "-map",
                             "0:v:0",
                             "-map",
@@ -690,6 +715,35 @@ def _render_final_sync(
                         return
                     logger.warning("ffmpeg bgm mix failed, fallback to python compose: %s", (mix_proc.stderr or "")[:400])
                 else:
+                    boost_cmd = [
+                        ffmpeg_bin,
+                        "-y",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
+                        "-i",
+                        str(merged_no_bgm),
+                        "-map",
+                        "0:v:0",
+                        "-map",
+                        "0:a:0",
+                        "-c:v",
+                        "copy",
+                        "-filter:a",
+                        f"volume={_FINAL_AUDIO_GAIN}",
+                        "-c:a",
+                        "aac",
+                        "-b:a",
+                        _VIDEO_AUDIO_BITRATE,
+                        "-movflags",
+                        "+faststart",
+                        str(output_path),
+                    ]
+                    boost_proc = subprocess.run(boost_cmd, capture_output=True, text=True)
+                    if boost_proc.returncode == 0 and output_path.exists():
+                        logger.info("Final compose via ffmpeg concat + final gain")
+                        return
+                    logger.warning("ffmpeg final gain failed, fallback to concat copy: %s", (boost_proc.stderr or "")[:400])
                     shutil.copyfile(merged_no_bgm, output_path)
                     logger.info("Final compose via ffmpeg concat copy")
                     return
@@ -735,7 +789,11 @@ def _render_final_sync(
                 logger.warning("BGM file does not exist, skip mixing: %s", bgm_path)
 
         final_output = final_with_audio or final
-        final_output.write_videofile(
+        boosted_output = final_output
+        if final_output.audio is not None:
+            boosted_output = final_output.with_audio(final_output.audio.with_volume_scaled(_FINAL_AUDIO_GAIN))
+
+        boosted_output.write_videofile(
             str(output_path),
             fps=fps,
             audio_codec="aac",
@@ -744,6 +802,9 @@ def _render_final_sync(
             ffmpeg_params=["-crf", final_crf, "-movflags", "+faststart", "-b:a", _VIDEO_AUDIO_BITRATE],
             logger=None,
         )
+
+        if boosted_output is not final_output:
+            boosted_output.close()
     finally:
         if final_with_audio is not None:
             final_with_audio.close()
