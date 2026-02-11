@@ -9469,6 +9469,235 @@
         ],
         "scene_summary": "Dim office hallway outside 749 bureau | Staring at the 749 bureau sign while gripping fruit knife"
       }
+    },
+    {
+      "id": "bf0982410a884b84909575fbf7794e23",
+      "created_at": "2026-02-11T14:47:17.265737+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_144717_fd567c53.png",
+      "prompt": "old alley, South City, midnight | staggering forward while gripping fruit knife",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "staggering forward while gripping fruit knife",
+        "location_hint": "old alley, South City, midnight",
+        "segment_text": "书名：魂穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。",
+        "scene_elements": [
+          "cracked stone walls",
+          "flickering streetlamp",
+          "swirling mist",
+          "long shadows"
+        ],
+        "action_keywords": [
+          "staggering",
+          "gripping fruit knife",
+          "cold stare"
+        ],
+        "location_keywords": [
+          "old alley",
+          "South City",
+          "midnight"
+        ],
+        "mood": "bleak, eerie, desperate",
+        "shot_type": "medium shot"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "staggering forward while gripping fruit knife",
+        "location_hint": "old alley, South City, midnight",
+        "segment_text": "书名：魂穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。",
+        "scene_elements": [
+          "cracked stone walls",
+          "flickering streetlamp",
+          "swirling mist",
+          "long shadows"
+        ],
+        "action_keywords": [
+          "staggering",
+          "gripping fruit knife",
+          "cold stare"
+        ],
+        "location_keywords": [
+          "old alley",
+          "South City",
+          "midnight"
+        ],
+        "mood": "bleak, eerie, desperate",
+        "shot_type": "medium shot",
+        "action_tokens": [
+          "staggering",
+          "forward",
+          "while",
+          "gripping",
+          "fruit",
+          "knife",
+          "cold",
+          "stare",
+          "书名",
+          "魂穿诡异",
+          "南城",
+          "深夜",
+          "罗严脸色枯槁无神",
+          "踉跄地走在旧巷之中"
+        ],
+        "location_tokens": [
+          "old",
+          "alley",
+          "south",
+          "city",
+          "midnight"
+        ],
+        "scene_tokens": [
+          "书名",
+          "魂穿诡异",
+          "南城",
+          "深夜",
+          "罗严脸色枯槁无神",
+          "踉跄地走在旧巷之中",
+          "cracked",
+          "stone",
+          "walls",
+          "flickering",
+          "streetlamp",
+          "swirling",
+          "mist",
+          "long",
+          "shadows",
+          "bleak",
+          "eerie",
+          "desperate",
+          "medium",
+          "shot"
+        ],
+        "scene_summary": "old alley, South City, midnight | staggering forward while gripping fruit knife"
+      }
+    },
+    {
+      "id": "565b9ba99b6847dba6175197ef2f69fc",
+      "created_at": "2026-02-11T14:49:54.208217+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_144954_0186acb1.png",
+      "prompt": "dimly lit narrow alley | tight grip on fruit knife, eyes scanning, stumbling",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tight grip on fruit knife, eyes scanning, stumbling",
+        "location_hint": "dimly lit narrow alley",
+        "segment_text": "】【极度饥饿！】【您的「饱食度」已降为「21%」，生命力目前剩余「30%」，请您尽快进食！】他饿得头昏眼花，",
+        "scene_elements": [
+          "wet cobblestones",
+          "flickering streetlamp",
+          "graffiti-covered walls",
+          "trash bin",
+          "UI overlay showing hunger and health"
+        ],
+        "action_keywords": [
+          "gripping fruit knife",
+          "dizzy",
+          "stumbling"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "narrow alley",
+          "wet cobblestones"
+        ],
+        "mood": "desperate, tense",
+        "shot_type": "close-up"
+      },
+      "match_profile": {
+        "schema_version": 2,
+        "character_key": "95c3898ad1aba192",
+        "character_name": "罗严",
+        "character_role": "主角，魂穿到平行世界的诡异（饕餮）",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "action_hint": "tight grip on fruit knife, eyes scanning, stumbling",
+        "location_hint": "dimly lit narrow alley",
+        "segment_text": "】【极度饥饿！】【您的「饱食度」已降为「21%」，生命力目前剩余「30%」，请您尽快进食！】他饿得头昏眼花，",
+        "scene_elements": [
+          "wet cobblestones",
+          "flickering streetlamp",
+          "graffiti-covered walls",
+          "trash bin",
+          "UI overlay showing hunger and health"
+        ],
+        "action_keywords": [
+          "gripping fruit knife",
+          "dizzy",
+          "stumbling"
+        ],
+        "location_keywords": [
+          "dark alley",
+          "narrow alley",
+          "wet cobblestones"
+        ],
+        "mood": "desperate, tense",
+        "shot_type": "close-up",
+        "action_tokens": [
+          "tight",
+          "grip",
+          "on",
+          "fruit",
+          "knife",
+          "eyes",
+          "scanning",
+          "stumbling",
+          "gripping",
+          "dizzy",
+          "极度饥饿",
+          "您的",
+          "饱食度",
+          "已降为",
+          "21",
+          "生命力目前剩余",
+          "30",
+          "请您尽快进食",
+          "他饿得头昏眼花"
+        ],
+        "location_tokens": [
+          "dimly",
+          "lit",
+          "narrow",
+          "alley",
+          "dark",
+          "wet",
+          "cobblestones"
+        ],
+        "scene_tokens": [
+          "极度饥饿",
+          "您的",
+          "饱食度",
+          "已降为",
+          "21",
+          "生命力目前剩余",
+          "30",
+          "请您尽快进食",
+          "他饿得头昏眼花",
+          "wet",
+          "cobblestones",
+          "flickering",
+          "streetlamp",
+          "graffiti",
+          "covered",
+          "walls",
+          "trash",
+          "bin",
+          "ui",
+          "overlay",
+          "showing",
+          "hunger",
+          "and",
+          "health",
+          "desperate",
+          "tense",
+          "close",
+          "up"
+        ],
+        "scene_summary": "dimly lit narrow alley | tight grip on fruit knife, eyes scanning, stumbling"
+      }
     }
   ]
 }

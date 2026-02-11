@@ -17,6 +17,7 @@ from moviepy import AudioFileClip, CompositeAudioClip, CompositeVideoClip, Image
 from ..config import project_path, settings
 from ..models import CharacterSuggestion, GenerateVideoRequest, JobStatus
 from ..state import job_store
+from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
@@ -32,7 +33,7 @@ from .scene_cache_service import (
     render_cached_image_to_output,
     save_scene_image_cache_entry,
 )
-from .tts_service import synthesize_tts
+from .tts_service import get_audio_duration, synthesize_tts
 
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,11 @@ _SUBTITLE_FONT_PATH: str | None = None
 
 _VIDEO_AUDIO_BITRATE = "96k"
 _TTS_GAIN = 1.15
+_NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
+_DIALOG_QUOTE_PAIRS = {
+    '"': '"',
+    "\u201c": "\u201d",  # “ ”
+}
 
 
 def _resolve_render_profile(mode: str | None) -> dict:
@@ -89,6 +95,203 @@ def _pick_character(characters: list[CharacterSuggestion], text: str) -> Charact
         if item.name and item.name in text:
             return item
     return characters[0]
+
+
+def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_voice: str = _NARRATOR_VOICE_ID) -> list[CharacterSuggestion]:
+    if not characters:
+        return []
+
+    available = [voice.id for voice in VOICE_INFOS]
+    if narrator_voice not in available:
+        narrator_voice = available[0] if available else _NARRATOR_VOICE_ID
+
+    used: set[str] = {narrator_voice}
+    prioritized = sorted(
+        characters,
+        key=lambda item: int(item.importance or 0),
+        reverse=True,
+    )
+
+    for character in prioritized:
+        current = (character.voice_id or "").strip()
+        if current and current not in used and current in available:
+            used.add(current)
+            continue
+
+        recommended = recommend_voice(character.role or "", character.personality or "")
+        if recommended and recommended in available and recommended not in used:
+            character.voice_id = recommended
+            used.add(recommended)
+            continue
+
+        fallback = next((voice_id for voice_id in available if voice_id not in used), None)
+        if fallback:
+            character.voice_id = fallback
+            used.add(fallback)
+            continue
+
+        character.voice_id = current if current in available else narrator_voice
+
+    return characters
+
+
+def _extract_quote_blocks(text: str) -> list[tuple[str, int, int]]:
+    content = (text or "").strip()
+    if not content:
+        return []
+
+    blocks: list[tuple[str, int, int]] = []
+    index = 0
+    length = len(content)
+    while index < length:
+        opener = content[index]
+        closer = _DIALOG_QUOTE_PAIRS.get(opener)
+        if not closer:
+            index += 1
+            continue
+
+        end = content.find(closer, index + 1)
+        if end <= index + 1:
+            index += 1
+            continue
+
+        quote_text = content[index + 1 : end].strip()
+        if quote_text:
+            blocks.append((quote_text, index, end))
+        index = end + 1
+    return blocks
+
+
+def _pick_dialogue_voice(characters: list[CharacterSuggestion], dialog_index: int, narrator_voice: str) -> str:
+    available = [item for item in characters if (item.voice_id or "").strip() and item.voice_id != narrator_voice]
+    if not available:
+        return narrator_voice
+    return available[dialog_index % len(available)].voice_id
+
+
+def _merge_tts_pieces(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    merged: list[tuple[str, str]] = []
+    for text, voice in pieces:
+        current_text = (text or "").strip()
+        if not current_text:
+            continue
+        current_voice = (voice or _NARRATOR_VOICE_ID).strip() or _NARRATOR_VOICE_ID
+        if merged and merged[-1][1] == current_voice:
+            merged[-1] = (merged[-1][0] + current_text, current_voice)
+        else:
+            merged.append((current_text, current_voice))
+    return merged
+
+
+def _build_tts_pieces(text: str, characters: list[CharacterSuggestion], narrator_voice: str) -> list[tuple[str, str]]:
+    clean = (text or "").strip()
+    if not clean:
+        return []
+
+    quotes = _extract_quote_blocks(clean)
+    if not quotes:
+        return [(clean, narrator_voice)]
+
+    pieces: list[tuple[str, str]] = []
+    cursor = 0
+    dialog_index = 0
+    for quoted, quote_start, quote_end in quotes:
+        if quote_start < cursor:
+            continue
+        if quote_end <= quote_start:
+            continue
+
+        narration = clean[cursor:quote_start].strip()
+        if narration:
+            pieces.append((narration, narrator_voice))
+
+        pieces.append((quoted, _pick_dialogue_voice(characters, dialog_index, narrator_voice)))
+        dialog_index += 1
+        cursor = quote_end + 1
+
+    tail = clean[cursor:].strip()
+    if tail:
+        pieces.append((tail, narrator_voice))
+
+    if not pieces:
+        return [(clean, narrator_voice)]
+    return _merge_tts_pieces(pieces)
+
+
+async def _synthesize_segment_tts(
+    text: str,
+    characters: list[CharacterSuggestion],
+    output_path: Path,
+    narrator_voice: str = _NARRATOR_VOICE_ID,
+) -> tuple[Path, float]:
+    parts = _build_tts_pieces(text, characters, narrator_voice)
+    if not parts:
+        return await synthesize_tts(text=text, voice=narrator_voice, output_path=output_path)
+
+    if len(parts) == 1:
+        only_text, only_voice = parts[0]
+        return await synthesize_tts(text=only_text, voice=only_voice, output_path=output_path)
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return await synthesize_tts(text=text, voice=narrator_voice, output_path=output_path)
+
+    temp_parts = output_path.parent / f"{output_path.stem}_tts_parts"
+    temp_parts.mkdir(parents=True, exist_ok=True)
+    part_files: list[Path] = []
+    total_duration = 0.0
+
+    try:
+        for idx, (piece_text, piece_voice) in enumerate(parts):
+            part_path = temp_parts / f"part_{idx:03d}.mp3"
+            generated_path, piece_duration = await synthesize_tts(text=piece_text, voice=piece_voice, output_path=part_path)
+            part_files.append(generated_path)
+            total_duration += max(piece_duration, 0.0)
+
+        concat_file = temp_parts / "concat_list.txt"
+        concat_lines = []
+        for path in part_files:
+            escaped = str(path.resolve()).replace("'", "'\\''")
+            concat_lines.append(f"file '{escaped}'")
+        concat_file.write_text("\n".join(concat_lines), encoding="utf-8")
+
+        cmd = [
+            ffmpeg_bin,
+            "-y",
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+            "-c",
+            "copy",
+            str(output_path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0 and output_path.exists():
+            duration = get_audio_duration(output_path)
+            return output_path, (duration if duration > 0 else total_duration)
+
+        logger.warning("TTS concat failed, fallback to narrator voice: %s", (proc.stderr or "")[:400])
+        return await synthesize_tts(text=text, voice=narrator_voice, output_path=output_path)
+    finally:
+        for file in part_files:
+            try:
+                file.unlink(missing_ok=True)
+            except Exception:
+                pass
+        try:
+            (temp_parts / "concat_list.txt").unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            temp_parts.rmdir()
+        except Exception:
+            pass
 
 
 def _resolve_subtitle_font_path() -> str | None:
@@ -668,6 +871,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             raise ValueError("No segment groups produced")
 
         resolution = _parse_resolution(payload.resolution)
+        characters = _sanitize_character_voices(list(payload.characters), narrator_voice=_NARRATOR_VOICE_ID)
         clip_paths: list[str] = []
         total = len(segments)
         no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
@@ -690,7 +894,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 clip_paths=clip_paths,
             )
 
-            character = _pick_character(payload.characters, segment_text)
+            character = _pick_character(characters, segment_text)
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
@@ -704,7 +908,12 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 )
             )
             audio_task = asyncio.create_task(
-                synthesize_tts(text=segment_text, voice=character.voice_id, output_path=audio_path)
+                _synthesize_segment_tts(
+                    text=segment_text,
+                    characters=characters,
+                    output_path=audio_path,
+                    narrator_voice=_NARRATOR_VOICE_ID,
+                )
             )
 
             prompt_bundle = await prompt_task

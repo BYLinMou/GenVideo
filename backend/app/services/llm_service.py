@@ -86,8 +86,25 @@ def _extract_json_object(text: str) -> dict | None:
 
 
 def _normalize_segmentation_text(text: str) -> str:
-    raw = (text or "").replace("\r\n", "").replace("\n", "").replace("\r", "")
-    return re.sub(r"[ \t\f\v]+", " ", raw).strip()
+    raw = (text or "").replace("\r\n", "\n").replace("\r", "\n")
+    heading_pattern = re.compile(r"^\s*#\s*\d+\s*[\uFF08(]\s*\d+\s*\u53E5\s*[\uFF09)]\s*$")
+
+    kept_lines: list[str] = []
+    for line in raw.split("\n"):
+        normalized = re.sub(r"[ \t\f\v]+", " ", line).strip()
+        if not normalized:
+            continue
+        if heading_pattern.match(normalized):
+            continue
+        kept_lines.append(normalized)
+
+    merged = " ".join(kept_lines)
+    merged = re.sub(r"[ \t\f\v]+", " ", merged)
+    return merged.strip()
+    raw = re.sub(r"^\s*#\s*\d+\s*[（(]\s*\d+\s*句\s*[）)]\s*$", "", raw, flags=re.MULTILINE)
+    raw = raw.replace("\n", " ")
+    raw = re.sub(r"[ \t\f\v]+", " ", raw)
+    return raw.strip()
 
 
 def split_sentences(text: str) -> list[str]:
@@ -95,72 +112,167 @@ def split_sentences(text: str) -> list[str]:
     if not clean:
         return []
 
-    delimiters = {
+    return _split_sentences_v2(clean)
+
+    sentence_delimiters = {
         "\u3002",  # full stop
         "\uff01",  # exclamation
         "\uff1f",  # question
         "\uff1b",  # semicolon
-        "\uff0c",  # comma
-        "\u3001",  # pause comma
         ".",
-        ";",
-        ",",
         "!",
         "?",
+        ";",
     }
-    opening_marks = {"【", "[", "（", "(", "「", "『", "“", '"', "‘", "'"}
     closing_marks = {"】", "]", "）", ")", "」", "』", "”", '"', "’", "'"}
 
+    closing_marks = {
+        "\u3011",
+        "]",
+        "\uFF09",
+        ")",
+        "\u300D",
+        "\u300F",
+        "\u201D",
+        '"',
+        "\u2019",
+        "'",
+    }
+
     sentences: list[str] = []
-    current_chars: list[str] = []
+    buffer: list[str] = []
     length = len(clean)
 
-    def _flush_current() -> None:
-        candidate = "".join(current_chars).strip()
+    def _flush() -> None:
+        candidate = "".join(buffer).strip()
         if candidate:
             sentences.append(candidate)
-        current_chars.clear()
+        buffer.clear()
 
     index = 0
     while index < length:
         char = clean[index]
 
-        if char in opening_marks and current_chars:
-            _flush_current()
+        buffer.append(char)
 
-        current_chars.append(char)
-
-        if char in delimiters:
-            next_char = clean[index + 1] if index + 1 < length else ""
-            prev_char = clean[index - 1] if index - 1 >= 0 else ""
-
-            if next_char in delimiters:
-                index += 1
-                continue
-
-            # Avoid splitting each char when broken encoding appears as "????".
-            if char == "?" and prev_char == "?":
-                index += 1
-                continue
-
-            tail_index = index + 1
-            while tail_index < length and clean[tail_index] in closing_marks:
-                current_chars.append(clean[tail_index])
-                tail_index += 1
-
-            _flush_current()
-            index = tail_index
+        if char not in sentence_delimiters:
+            index += 1
             continue
 
-        if char in closing_marks:
-            next_char = clean[index + 1] if index + 1 < length else ""
-            if next_char and next_char not in closing_marks and next_char not in delimiters:
-                _flush_current()
+        prev_char = clean[index - 1] if index - 1 >= 0 else ""
+        next_char = clean[index + 1] if index + 1 < length else ""
 
-        index += 1
+        if next_char in sentence_delimiters:
+            index += 1
+            continue
 
-    _flush_current()
+        if char == "." and prev_char.isdigit() and next_char.isdigit():
+            index += 1
+            continue
 
+        if char == "?" and prev_char == "?":
+            index += 1
+            continue
+
+        tail_index = index + 1
+        while tail_index < length and clean[tail_index] in closing_marks:
+            buffer.append(clean[tail_index])
+            tail_index += 1
+
+        _flush()
+        index = tail_index
+
+    _flush()
+    return sentences
+
+
+def _split_sentences_v2(clean: str) -> list[str]:
+    sentence_delimiters = {
+        "\u3002",  # 。
+        "\uff01",  # ！
+        "\uff1f",  # ？
+        "\uff1b",  # ；
+        "\uff0c",  # ，
+        ".",
+        "!",
+        "?",
+        ";",
+        ",",
+    }
+    opening_marks = {
+        "\u3010",  # 【
+        "\u300c",  # 「
+        "\u300e",  # 『
+        "\u201c",  # “
+        "\u2018",  # ‘
+        "\uFF08",  # （
+        "(",
+        "[",
+        "{",
+        '"',
+        "'",
+    }
+    closing_marks = {
+        "\u3011",  # 】
+        "]",
+        "\uFF09",  # ）
+        ")",
+        "\u300D",  # 」
+        "\u300F",  # 』
+        "\u201D",  # ”
+        "\u2019",  # ’
+        "}",
+        '"',
+        "'",
+    }
+
+    sentences: list[str] = []
+    buffer: list[str] = []
+    length = len(clean)
+
+    def _flush() -> None:
+        candidate = "".join(buffer).strip()
+        if candidate:
+            sentences.append(candidate)
+        buffer.clear()
+
+    index = 0
+    while index < length:
+        char = clean[index]
+        buffer.append(char)
+
+        if char not in sentence_delimiters:
+            index += 1
+            continue
+
+        prev_char = clean[index - 1] if index - 1 >= 0 else ""
+        next_char = clean[index + 1] if index + 1 < length else ""
+
+        if next_char in sentence_delimiters:
+            index += 1
+            continue
+
+        if next_char in opening_marks:
+            index += 1
+            continue
+
+        if char == "." and prev_char.isdigit() and next_char.isdigit():
+            index += 1
+            continue
+
+        if char == "?" and prev_char == "?":
+            index += 1
+            continue
+
+        tail_index = index + 1
+        while tail_index < length and clean[tail_index] in closing_marks:
+            buffer.append(clean[tail_index])
+            tail_index += 1
+
+        _flush()
+        index = tail_index
+
+    _flush()
     return sentences
 
 
