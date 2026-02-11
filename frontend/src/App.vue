@@ -295,6 +295,46 @@ function clearNameReplacementEntries() {
   replacementEntries.value = []
 }
 
+function removeChapterHeadings() {
+  const source = form.text || ''
+  if (!source.trim()) {
+    ElMessage.warning('请先输入文本')
+    return
+  }
+
+  const chapterPrefixPatterns = [
+    /^\s*正文\s*第[0-9０-９零〇一二两三四五六七八九十百千萬万壹贰叁肆伍陆柒捌玖拾佰仟廿卅]+[章节卷集部篇回]\s*[：:、，,。.!！?？;；·\-—~\s]*/,
+    /^\s*第[0-9０-９零〇一二两三四五六七八九十百千萬万壹贰叁肆伍陆柒捌玖拾佰仟廿卅]+[章节卷集部篇回]\s*[：:、，,。.!！?？;；·\-—~\s]*/,
+    /^\s*卷\s*[0-9０-９零〇一二两三四五六七八九十百千萬万壹贰叁肆伍陆柒捌玖拾佰仟廿卅]+\s*[：:、，,。.!！?？;；·\-—~\s]*/,
+    /^\s*chapter\s*[0-9ivxlcdm]+\b\s*[：:、，,。.!！?？;；·\-—~\s]*/i,
+  ]
+
+  const lines = source.split(/\r?\n/)
+  let changed = 0
+  const normalized = lines.map((line) => {
+    let next = line
+    for (const pattern of chapterPrefixPatterns) {
+      if (pattern.test(next)) {
+        const replaced = next.replace(pattern, '')
+        if (replaced !== next) {
+          next = replaced
+          changed += 1
+        }
+        break
+      }
+    }
+    return next
+  })
+
+  if (!changed) {
+    ElMessage.info('未检测到可过滤的章节前缀')
+    return
+  }
+
+  form.text = normalized.join('\n')
+  ElMessage.success(`已处理 ${changed} 处章节前缀`)
+}
+
 function activeReplacementPairs() {
   return replacementEntries.value
     .filter((item) => item.enabled && item.replacement.trim() && item.replacement.trim() !== item.word)
@@ -908,6 +948,7 @@ onUnmounted(() => {
       <h2>{{ t('section.text') }}</h2>
       <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
       <div class="actions">
+        <el-button @click="removeChapterHeadings">过滤章节标题</el-button>
         <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
         <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
       </div>
