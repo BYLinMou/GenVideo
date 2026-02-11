@@ -1,75 +1,75 @@
 {
   "entries": [
     {
-      "id": "c3f96fe13128429d8b7e2ebaf1f290a0",
-      "created_at": "2026-02-11T06:26:56.844163+00:00",
-      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_062656_e185bbf7.png",
-      "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。",
-      "descriptor": {
-        "character_name": "林昭",
-        "character_role": "主角，潜龙渊的少年学徒，承受极端炼体与灵根觉醒的苦难",
-        "character_appearance": "细瘦的少年，皮肤苍白，常被药膏和血痕覆盖，眼神中带有坚韧的光芒",
-        "character_personality": "坚韧不拔、忍耐力极强、内心充满对自由与温暖的渴望，却极少流露情感",
-        "character_prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感",
-        "action_hint": "《鎮國靈根》 1. 冰冷的药液漫过脖颈时",
-        "location_hint": "",
-        "segment_text": "《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。",
-        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/林昭_5d69a62b.png",
-        "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 《鎮國靈根》 1. 冰冷的药液漫过脖颈时，林昭只来得及数清石室顶上有七道裂纹。"
-      }
-    },
-    {
-      "id": "5d432fda8d87405881e3a46944b43879",
-      "created_at": "2026-02-11T06:28:05.078846+00:00",
-      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_062805_ad4a90be.png",
-      "prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白, ”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。",
-      "descriptor": {
-        "character_name": "黑袍医师",
-        "character_role": "潜龙渊的医官，负责记录与评估学徒的药浴与炼体数据",
-        "character_appearance": "身着黑袍，面容冷峻，手指常带微光，动作机械且精准",
-        "character_personality": "冷漠、专业、毫无感情波动，只关注实验数据与结果",
-        "character_prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白",
-        "action_hint": "”黑袍医师的声音毫无起伏",
-        "location_hint": "手掌压在他单薄的肩膀上",
-        "segment_text": "”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。",
-        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/黑袍医师_c0c6007e.png",
-        "prompt": "成熟男性声音，沉稳且权威，语气平淡如记录仪的旁白, ”黑袍医师的声音毫无起伏，手掌压在他单薄的肩膀上，将他完全按入药桶。"
-      }
-    },
-    {
-      "id": "3159ba1faa7b4deb9a3fabae1550b7fa",
-      "created_at": "2026-02-11T06:30:02.390626+00:00",
-      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_063002_f4fa501b.png",
-      "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。",
-      "descriptor": {
-        "character_name": "林昭",
-        "character_role": "主角，潜龙渊的少年学徒，承受极端炼体与灵根觉醒的苦难",
-        "character_appearance": "细瘦的少年，皮肤苍白，常被药膏和血痕覆盖，眼神中带有坚韧的光芒",
-        "character_personality": "坚韧不拔、忍耐力极强、内心充满对自由与温暖的渴望，却极少流露情感",
-        "character_prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感",
-        "action_hint": "剧痛瞬间炸开",
-        "location_hint": "",
-        "segment_text": "剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。",
-        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/林昭_5d69a62b.png",
-        "prompt": "年轻男性声音，带有轻微的疲惫与坚毅，语调清晰但略带压抑的情感, 剧痛瞬间炸开。桶内那刚及始龀的孩童猛地睁大眼睛，死死咬住下唇。那不是普通的痛，像是千万根烧红的针扎进皮肤，顺着血脉一路灼烧，直冲骨髓。"
-      }
-    },
-    {
-      "id": "9b798feacfa34be18a17312a4263d9f8",
-      "created_at": "2026-02-11T09:16:33.769898+00:00",
-      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_091633_7d75803b.png",
-      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.; Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.. Character personality and vibe: Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.. Current plot segment: 书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。. Scene/background/action must follow current plot segment. Additional style and composition details: Chinese style, deep night in a dimly lit old alley of South City, foggy shadows, Luo Yan—a thin young man in a black coat with hood pulled low, sleeves concealing a clenched fruit knife, black dilated eyes a",
+      "id": "d777a1da982340ada7720537fed7181a",
+      "created_at": "2026-02-11T09:38:12.903504+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_093812_2b47db6b.png",
+      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 他披着一件单薄的黑色外套，袖子拉得很下，遮住了右手紧攥的一把水果刀，隐藏着无穷的杀意。【饥饿！. Scene/background/action must follow current plot segment. Additional style and composition details: A gaunt young man with pale skin and black eyes turning blood‑red, wearing a thin black coat with sleeves pulled down, his right hand hidden under the sleeve clutching a fruit knife, expression of fierce hunger, standing in a dimly l",
       "descriptor": {
         "character_name": "罗严",
-        "character_role": "Protagonist – a transplanted “诡异” (monster) struggling to survive in a modern city.",
-        "character_appearance": "Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.",
-        "character_personality": "Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.",
-        "character_prompt": "Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.",
-        "action_hint": "书名：混穿诡异",
-        "location_hint": "踉跄地走在旧巷之中",
-        "segment_text": "书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。",
+        "character_role": "Protagonist / Survivor (a soul‑transferred “诡异” seeking food and safety)",
+        "character_appearance": "Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.",
+        "character_personality": "Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.",
+        "character_prompt": "A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.",
+        "action_hint": "他披着一件单薄的黑色外套",
+        "location_hint": "",
+        "segment_text": "他披着一件单薄的黑色外套，袖子拉得很下，遮住了右手紧攥的一把水果刀，隐藏着无穷的杀意。【饥饿！",
         "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
-        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Thin young man wearing a thin black coat with the hood pulled low, sleeves covering a tightly clenched fruit knife. Black, pupil‑dilated eyes and a gaunt, hollow expression.; Chinese style. You are Luo Yan, a hungry, cold‑hearted “Eerie” creature in a modern city. Your sole goal is to survive by hunting humans while suppressing your savage instincts.. Character personality and vibe: Cold, cautious, ruthless, driven by extreme hunger. Lacks empathy for humans and acts with calculated aggression when necessary.. Current plot segment: 书名：混穿诡异。南城，深夜。罗严脸色枯槁无神，踉跄地走在旧巷之中。. Scene/b"
+        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 他披着一件单薄的黑色外套，袖子拉得很下，遮住了右手紧攥的一把水果刀，隐藏着无穷的杀意。【饥饿！. Scene/background/action must foll"
+      }
+    },
+    {
+      "id": "5ca5fd2e1fe940dc9f4a4840c3010ead",
+      "created_at": "2026-02-11T09:39:17.688907+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_093917_00e15ef0.png",
+      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 】【极度饥饿！】【您的「饱食度」已降为「21%」，生命力目前剩余「30%」，请您尽快进食！】他饿得头昏眼花，. Scene/background/action must follow current plot segment. Additional style and composition details: A gaunt young man named Luo Yan, pale gaunt face, black eyes turning blood‑red, wearing a thin black coat with sleeves pulled down and a hidden fruit knife in his right hand, clutching his stomach with a dizzy, desperate expre",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "Protagonist / Survivor (a soul‑transferred “诡异” seeking food and safety)",
+        "character_appearance": "Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.",
+        "character_personality": "Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.",
+        "character_prompt": "A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.",
+        "action_hint": "】【极度饥饿",
+        "location_hint": "",
+        "segment_text": "】【极度饥饿！】【您的「饱食度」已降为「21%」，生命力目前剩余「30%」，请您尽快进食！】他饿得头昏眼花，",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 】【极度饥饿！】【您的「饱食度」已降为「21%」，生命力目前剩余「30%」，请您尽快进食！】他饿得头昏眼花，. Scene/background/action mu"
+      }
+    },
+    {
+      "id": "aa27c20bbf3d4eb1acbc5a90d3db5e74",
+      "created_at": "2026-02-11T09:40:29.426309+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_094029_069446bf.png",
+      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 血色文字如同弹幕一般，不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉，而是他的「死亡警告」.罗严并不属于这个世界。. Scene/background/action must follow current plot segment. Additional style and composition details: A gaunt young man with pale skin wearing a thin black coat with sleeves pulled down, fruit knife concealed in his right hand, black eyes glowing blood‑red, surrounded by swirling crimson text like a bullet‑screen inside ",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "Protagonist / Survivor (a soul‑transferred “诡异” seeking food and safety)",
+        "character_appearance": "Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.",
+        "character_personality": "Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.",
+        "character_prompt": "A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.",
+        "action_hint": "血色文字如同弹幕一般",
+        "location_hint": "不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉",
+        "segment_text": "血色文字如同弹幕一般，不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉，而是他的「死亡警告」.罗严并不属于这个世界。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 血色文字如同弹幕一般，不断在他的眼眶里面跳跃.这并不是他饿昏头而看见的幻觉，而是他的「死亡警告」.罗严并不属于这个世界。. Scene/background/act"
+      }
+    },
+    {
+      "id": "fe17afb914b14b3c92489bf9493e79fb",
+      "created_at": "2026-02-11T09:41:24.687361+00:00",
+      "image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/scene_cache/images/scene_20260211_094124_065cbac4.png",
+      "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 一天前，他本是蓝星的一名高三学子，家庭幸福美满，成绩稳定在中上游水平，日后考一个好大学是绝对没有问题的。. Scene/background/action must follow current plot segment. Additional style and composition details: A pale, gaunt teenage boy with black eyes, wearing a thin black coat with sleeves pulled down and a concealed fruit knife in his right hand, stands in a bright Chinese high school classroom with rows of desks and sunlight stream",
+      "descriptor": {
+        "character_name": "罗严",
+        "character_role": "Protagonist / Survivor (a soul‑transferred “诡异” seeking food and safety)",
+        "character_appearance": "Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.",
+        "character_personality": "Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.",
+        "character_prompt": "A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.",
+        "action_hint": "一天前",
+        "location_hint": "家庭幸福美满",
+        "segment_text": "一天前，他本是蓝星的一名高三学子，家庭幸福美满，成绩稳定在中上游水平，日后考一个好大学是绝对没有问题的。",
+        "reference_image_path": "C:/Users/User/Desktop/Script/GenVideo/assets/character_refs/罗严_24b4b796.png",
+        "prompt": "Character consistency is mandatory across frames. Use the provided reference image only for identity matching of 罗严 (face, hair, body shape, outfit details). Do not copy composition or background from the reference image. Never change core identity (age/gender/face/hair/outfit signature). Character appearance anchors: Wears a thin black coat with sleeves pulled down, concealing a fruit knife in his right hand; pale, gaunt face, black eyes that turn blood‑red when hungry.; A young male voice that is clear and steady, reflecting a desperate, determined college student turned monstrous predator.. Character personality and vibe: Cold, cautious, highly focused on survival; initially disoriented by hunger, gradually becomes ruthless and strategic, willing to sacrifice others to stay alive.. Current plot segment: 一天前，他本是蓝星的一名高三学子，家庭幸福美满，成绩稳定在中上游水平，日后考一个好大学是绝对没有问题的。. Scene/background/action must"
       }
     }
   ]
