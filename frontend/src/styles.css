@@ -41,6 +41,13 @@ body {
   gap: 12px;
 }
 
+label {
+  display: block;
+  font-size: 13px;
+  color: #475467;
+  margin-bottom: 6px;
+}
+
 .actions {
   display: flex;
   gap: 12px;
@@ -52,6 +59,10 @@ body {
   padding-left: 20px;
   max-height: 240px;
   overflow: auto;
+}
+
+.segments li {
+  margin-bottom: 10px;
 }
 
 .muted {
@@ -75,3 +86,54 @@ body {
   border-radius: 8px;
 }
 
+.character-card {
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+
+.ref-thumb {
+  margin-top: 8px;
+  width: 160px;
+  height: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #d0d5dd;
+}
+
+.upload-btn {
+  display: inline-flex;
+  align-items: center;
+  background: #eef4ff;
+  border: 1px solid #d0d5dd;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.upload-btn input {
+  display: none;
+}
+
+.clip-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+}
+
+.clip-item {
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.logs {
+  background: #111827;
+  color: #d1fae5;
+  border-radius: 8px;
+  padding: 12px;
+  max-height: 300px;
+  overflow: auto;
+  font-size: 12px;
+}

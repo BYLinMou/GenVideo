@@ -1,5 +1,6 @@
 .env.local
 outputs/
+logs/
 backend/__pycache__/
 backend/app/__pycache__/
 backend/app/services/__pycache__/

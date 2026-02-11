@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from uuid import uuid4
+
+from ..config import project_path, settings
+from ..models import CharacterImageItem
+from .image_service import generate_image
+
+
+logger = logging.getLogger(__name__)
+
+
+def list_character_reference_images(base_url: str) -> list[CharacterImageItem]:
+    root = project_path(settings.character_ref_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    result: list[CharacterImageItem] = []
+    for path in sorted(root.glob("*")):
+        if path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        rel = path.as_posix()
+        result.append(
+            CharacterImageItem(
+                path=rel,
+                url=f"{base_url}/assets/character_refs/{path.name}",
+                filename=path.name,
+            )
+        )
+    return result
+
+
+async def create_character_reference_image(
+    character_name: str,
+    prompt: str,
+    resolution: tuple[int, int],
+    base_url: str,
+) -> CharacterImageItem:
+    root = project_path(settings.character_ref_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    safe_name = "".join(ch for ch in character_name if ch.isalnum() or ch in {"_", "-"}) or "character"
+    filename = f"{safe_name}_{uuid4().hex[:8]}.png"
+    output_path = root / filename
+
+    await generate_image(prompt=prompt, output_path=output_path, resolution=resolution)
+
+    rel = output_path.as_posix()
+    return CharacterImageItem(
+        path=rel,
+        url=f"{base_url}/assets/character_refs/{filename}",
+        filename=filename,
+    )

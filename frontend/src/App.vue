@@ -4,25 +4,27 @@ import { ElMessage } from 'element-plus'
 
 import { api } from './api'
 
-const steps = ['選擇模型', '輸入文本', '角色分析', '角色確認', '生成視頻']
-const activeStep = ref(0)
+const models = ref([])
+const voices = ref([])
+const refImages = ref([])
+const selectedModel = ref('')
 
 const loading = reactive({
   models: false,
+  voices: false,
+  refs: false,
   analyze: false,
   segment: false,
-  generate: false
+  generate: false,
+  logs: false
 })
-
-const models = ref([])
-const selectedModel = ref('')
 
 const form = reactive({
   text: '',
   analysis_depth: 'detailed',
-  segment_method: 'smart',
-  max_segments: 0,
-  segments_per_image: 5,
+  segment_method: 'sentence',
+  sentences_per_segment: 5,
+  max_segment_groups: 0,
   resolution: '1080x1920',
   subtitle_style: 'highlight',
   fps: 30
@@ -30,7 +32,14 @@ const form = reactive({
 
 const characters = ref([])
 const confidence = ref(0)
-const segments = ref([])
+
+const segmentPreview = reactive({
+  total_segments: 0,
+  total_sentences: 0,
+  segments: []
+})
+
+const backendLogs = ref([])
 
 const job = reactive({
   id: '',
@@ -38,28 +47,28 @@ const job = reactive({
   progress: 0,
   step: '',
   message: '',
-  videoUrl: ''
+  videoUrl: '',
+  clipPreviewUrls: []
 })
 
 let pollingTimer = null
 
-const canAnalyze = computed(() => Boolean(selectedModel.value && form.text.trim()))
-const canGenerate = computed(() => characters.value.length > 0 && form.text.trim())
-const estimatedImageCount = computed(() => {
-  if (!segments.value.length) return 0
-  const effectiveSegmentCount =
-    Number(form.max_segments || 0) > 0
-      ? Math.min(segments.value.length, Number(form.max_segments))
-      : segments.value.length
-  return Math.ceil(effectiveSegmentCount / Math.max(1, Number(form.segments_per_image || 1)))
+const effectiveSegmentGroups = computed(() => {
+  if (!segmentPreview.total_segments) return 0
+  if (form.max_segment_groups > 0) {
+    return Math.min(segmentPreview.total_segments, form.max_segment_groups)
+  }
+  return segmentPreview.total_segments
 })
 
-function nextStep() {
-  activeStep.value = Math.min(activeStep.value + 1, steps.length - 1)
-}
-
-function prevStep() {
-  activeStep.value = Math.max(activeStep.value - 1, 0)
+function resetJob() {
+  job.id = ''
+  job.status = ''
+  job.progress = 0
+  job.step = ''
+  job.message = ''
+  job.videoUrl = ''
+  job.clipPreviewUrls = []
 }
 
 async function loadModels() {
@@ -67,18 +76,53 @@ async function loadModels() {
   try {
     const data = await api.getModels()
     models.value = data.models || []
-    const available = models.value.find((item) => item.available)
-    selectedModel.value = available?.id || models.value[0]?.id || ''
+    selectedModel.value = models.value.find((item) => item.available)?.id || models.value[0]?.id || ''
   } catch (error) {
-    ElMessage.error(`獲取模型失敗：${error.message}`)
+    ElMessage.error(`模型加载失败：${error.message}`)
   } finally {
     loading.models = false
   }
 }
 
+async function loadVoices() {
+  loading.voices = true
+  try {
+    const data = await api.getVoices()
+    voices.value = data.voices || []
+  } catch (error) {
+    ElMessage.error(`音色列表加载失败：${error.message}`)
+  } finally {
+    loading.voices = false
+  }
+}
+
+async function loadRefImages() {
+  loading.refs = true
+  try {
+    const data = await api.listCharacterRefImages()
+    refImages.value = data.images || []
+  } catch (error) {
+    ElMessage.error(`角色参考图加载失败：${error.message}`)
+  } finally {
+    loading.refs = false
+  }
+}
+
+async function loadLogs() {
+  loading.logs = true
+  try {
+    const data = await api.getLogs(200)
+    backendLogs.value = data.lines || []
+  } catch (error) {
+    ElMessage.error(`读取日志失败：${error.message}`)
+  } finally {
+    loading.logs = false
+  }
+}
+
 async function runAnalyze() {
-  if (!canAnalyze.value) {
-    ElMessage.warning('請先選擇模型並輸入文本')
+  if (!form.text.trim()) {
+    ElMessage.warning('请先输入文本')
     return
   }
   loading.analyze = true
@@ -86,14 +130,18 @@ async function runAnalyze() {
     const data = await api.analyzeCharacters({
       text: form.text,
       analysis_depth: form.analysis_depth,
-      model_id: selectedModel.value
+      model_id: selectedModel.value || null
     })
-    characters.value = data.characters || []
+    characters.value = (data.characters || []).map((item) => ({
+      ...item,
+      reference_image_path: item.reference_image_path || '',
+      reference_image_url: item.reference_image_url || '',
+      voice_id: item.voice_id || voices.value[0]?.id || 'zh-CN-YunxiNeural'
+    }))
     confidence.value = Number(data.confidence || 0)
-    activeStep.value = 2
     ElMessage.success('角色分析完成')
   } catch (error) {
-    ElMessage.error(`分析失敗：${error.message}`)
+    ElMessage.error(`角色分析失败：${error.message}`)
   } finally {
     loading.analyze = false
   }
@@ -101,7 +149,7 @@ async function runAnalyze() {
 
 async function runSegmentPreview() {
   if (!form.text.trim()) {
-    ElMessage.warning('請先輸入文本')
+    ElMessage.warning('请先输入文本')
     return
   }
   loading.segment = true
@@ -109,60 +157,27 @@ async function runSegmentPreview() {
     const data = await api.segmentText({
       text: form.text,
       method: form.segment_method,
-      model_id: selectedModel.value
+      sentences_per_segment: form.sentences_per_segment,
+      model_id: selectedModel.value || null
     })
-    segments.value = data.segments || []
-    ElMessage.success(`分段完成，共 ${segments.value.length} 段`)
+    segmentPreview.total_segments = data.total_segments || 0
+    segmentPreview.total_sentences = data.total_sentences || 0
+    segmentPreview.segments = data.segments || []
+    ElMessage.success(`分段完成：${segmentPreview.total_segments} 段（总句数：${segmentPreview.total_sentences || '-'}）`)
   } catch (error) {
-    ElMessage.error(`分段失敗：${error.message}`)
+    ElMessage.error(`分段失败：${error.message}`)
   } finally {
     loading.segment = false
   }
 }
 
 async function confirmCharacters() {
-  if (!characters.value.length) {
-    ElMessage.warning('沒有可確認的角色')
-    return
-  }
   try {
     await api.confirmCharacters({ characters: characters.value })
-    activeStep.value = 4
-    ElMessage.success('角色配置已確認')
+    ElMessage.success('角色配置已确认')
   } catch (error) {
-    ElMessage.error(`確認失敗：${error.message}`)
+    ElMessage.error(`确认失败：${error.message}`)
   }
-}
-
-function startPolling() {
-  stopPolling()
-  pollingTimer = setInterval(async () => {
-    if (!job.id) {
-      return
-    }
-    try {
-      const data = await api.getJob(job.id)
-      job.status = data.status
-      job.progress = Number(data.progress || 0)
-      job.step = data.step || ''
-      job.message = data.message || ''
-      if (data.status === 'completed') {
-        job.videoUrl = api.getVideoUrl(job.id)
-        stopPolling()
-        loading.generate = false
-        ElMessage.success('視頻生成完成')
-      }
-      if (data.status === 'failed') {
-        stopPolling()
-        loading.generate = false
-        ElMessage.error(data.message || '視頻生成失敗')
-      }
-    } catch (error) {
-      stopPolling()
-      loading.generate = false
-      ElMessage.error(`查詢任務狀態失敗：${error.message}`)
-    }
-  }, 2000)
 }
 
 function stopPolling() {
@@ -172,62 +187,136 @@ function stopPolling() {
   }
 }
 
+function startPolling() {
+  stopPolling()
+  pollingTimer = setInterval(async () => {
+    if (!job.id) return
+    try {
+      const status = await api.getJob(job.id)
+      job.status = status.status
+      job.progress = Number(status.progress || 0)
+      job.step = status.step || ''
+      job.message = status.message || ''
+      job.clipPreviewUrls = status.clip_preview_urls || []
+
+      if (status.status === 'completed') {
+        job.videoUrl = api.getVideoUrl(job.id)
+        stopPolling()
+        loading.generate = false
+        ElMessage.success('视频生成完成')
+      }
+      if (status.status === 'failed' || status.status === 'cancelled') {
+        stopPolling()
+        loading.generate = false
+        ElMessage.warning(status.message || `任务${status.status}`)
+      }
+    } catch (error) {
+      stopPolling()
+      loading.generate = false
+      ElMessage.error(`轮询任务失败：${error.message}`)
+    }
+  }, 1500)
+}
+
 async function runGenerate() {
-  if (!canGenerate.value) {
-    ElMessage.warning('請先完成角色分析')
+  if (!form.text.trim()) {
+    ElMessage.warning('请先输入文本')
     return
   }
+  if (!characters.value.length) {
+    ElMessage.warning('请先分析并确认角色')
+    return
+  }
+
   loading.generate = true
-  job.id = ''
-  job.status = 'queued'
-  job.progress = 0
-  job.step = ''
-  job.message = ''
-  job.videoUrl = ''
+  resetJob()
 
   try {
-    const data = await api.generateVideo({
+    const payload = {
       text: form.text,
       characters: characters.value,
       segment_method: form.segment_method,
-      max_segments: form.max_segments,
-      segments_per_image: form.segments_per_image,
+      sentences_per_segment: form.sentences_per_segment,
+      max_segment_groups: form.max_segment_groups,
       resolution: form.resolution,
       subtitle_style: form.subtitle_style,
       fps: form.fps,
-      model_id: selectedModel.value
-    })
+      model_id: selectedModel.value || null
+    }
+    const data = await api.generateVideo(payload)
     job.id = data.job_id
     job.status = data.status
     startPolling()
-    ElMessage.success('任務已提交，開始生成')
+    ElMessage.success('任务已提交')
   } catch (error) {
     loading.generate = false
-    ElMessage.error(`提交任務失敗：${error.message}`)
+    ElMessage.error(`提交任务失败：${error.message}`)
   }
 }
 
-onMounted(() => {
-  loadModels()
+async function cancelCurrentJob() {
+  if (!job.id) return
+  try {
+    await api.cancelJob(job.id)
+    ElMessage.success('已发送取消请求')
+  } catch (error) {
+    ElMessage.error(`取消失败：${error.message}`)
+  }
+}
+
+async function uploadRefImage(event, character) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const created = await api.uploadCharacterRefImage(file)
+    character.reference_image_path = created.path
+    character.reference_image_url = created.url
+    await loadRefImages()
+    ElMessage.success('参考图上传成功')
+  } catch (error) {
+    ElMessage.error(`上传失败：${error.message}`)
+  }
+}
+
+async function generateRefImage(character) {
+  try {
+    const created = await api.generateCharacterRefImage({
+      character_name: character.name || 'character',
+      prompt: character.base_prompt || character.appearance || `${character.name} 角色立绘`,
+      resolution: '768x768'
+    })
+    character.reference_image_path = created.path
+    character.reference_image_url = created.url
+    await loadRefImages()
+    ElMessage.success('参考图生成成功')
+  } catch (error) {
+    ElMessage.error(`生成失败：${error.message}`)
+  }
+}
+
+function bindRefImage(character, path) {
+  character.reference_image_path = path
+  character.reference_image_url = api.getCharacterRefImageUrl(path)
+}
+
+onMounted(async () => {
+  await Promise.all([loadModels(), loadVoices(), loadRefImages()])
 })
 </script>
 
 <template>
   <div class="page">
     <header class="header">
-      <h1>小說推文視頻生成系統</h1>
-      <p>模型選擇 → 角色分析 → 配置確認 → 自動生成視頻</p>
+      <h1>小说视频生成（工作流重构版）</h1>
+      <p>支持按句分段、每段小视频预览、任务取消、角色参考图复用</p>
     </header>
 
-    <el-steps :active="activeStep" finish-status="success" align-center>
-      <el-step v-for="step in steps" :key="step" :title="step" />
-    </el-steps>
-
     <section class="card">
-      <h2>1) 模型選擇</h2>
-      <el-skeleton :loading="loading.models" animated>
-        <template #default>
-          <el-select v-model="selectedModel" placeholder="請選擇模型" style="width: 100%">
+      <h2>基础设置</h2>
+      <div class="grid">
+        <div>
+          <label>模型</label>
+          <el-select v-model="selectedModel" style="width: 100%">
             <el-option
               v-for="item in models"
               :key="item.id"
@@ -236,154 +325,182 @@ onMounted(() => {
               :disabled="!item.available"
             />
           </el-select>
-        </template>
-      </el-skeleton>
+        </div>
+        <div>
+          <label>分析深度</label>
+          <el-select v-model="form.analysis_depth" style="width: 100%">
+            <el-option label="basic" value="basic" />
+            <el-option label="detailed" value="detailed" />
+          </el-select>
+        </div>
+        <div>
+          <label>分段方式</label>
+          <el-select v-model="form.segment_method" style="width: 100%">
+            <el-option label="按句分段" value="sentence" />
+            <el-option label="智能分段" value="smart" />
+            <el-option label="固定字数" value="fixed" />
+          </el-select>
+        </div>
+        <div>
+          <label>每段句数</label>
+          <el-input-number v-model="form.sentences_per_segment" :min="1" :max="50" />
+        </div>
+        <div>
+          <label>最大处理段数（0=全部）</label>
+          <el-input-number v-model="form.max_segment_groups" :min="0" :max="10000" />
+        </div>
+        <div>
+          <label>分辨率</label>
+          <el-select v-model="form.resolution" style="width: 100%">
+            <el-option label="1080x1920" value="1080x1920" />
+            <el-option label="720x1280" value="720x1280" />
+            <el-option label="1920x1080" value="1920x1080" />
+          </el-select>
+        </div>
+        <div>
+          <label>字幕样式</label>
+          <el-select v-model="form.subtitle_style" style="width: 100%">
+            <el-option label="basic" value="basic" />
+            <el-option label="highlight" value="highlight" />
+            <el-option label="danmaku" value="danmaku" />
+            <el-option label="center" value="center" />
+          </el-select>
+        </div>
+        <div>
+          <label>FPS</label>
+          <el-input-number v-model="form.fps" :min="15" :max="60" />
+        </div>
+      </div>
     </section>
 
     <section class="card">
-      <h2>2) 小說文本與視頻參數</h2>
-      <el-form label-position="top">
-        <el-form-item label="小說文本">
-          <el-input
-            v-model="form.text"
-            type="textarea"
-            :rows="10"
-            placeholder="貼上小說內容..."
-          />
-        </el-form-item>
-        <div class="grid">
-          <el-form-item label="分析深度">
-            <el-select v-model="form.analysis_depth">
-              <el-option label="Basic" value="basic" />
-              <el-option label="Detailed" value="detailed" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="分段方式">
-            <el-select v-model="form.segment_method">
-              <el-option label="智能分段" value="smart" />
-              <el-option label="按句分段" value="sentence" />
-              <el-option label="固定字數" value="fixed" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="分辨率">
-            <el-select v-model="form.resolution">
-              <el-option label="1080x1920 (9:16)" value="1080x1920" />
-              <el-option label="720x1280 (9:16)" value="720x1280" />
-              <el-option label="1920x1080 (16:9)" value="1920x1080" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="字幕樣式">
-            <el-select v-model="form.subtitle_style">
-              <el-option label="基礎字幕" value="basic" />
-              <el-option label="逐字高亮" value="highlight" />
-              <el-option label="彈幕樣式" value="danmaku" />
-              <el-option label="居中大字" value="center" />
-            </el-select>
-          </el-form-item>
-          <el-form-item label="FPS">
-            <el-input-number v-model="form.fps" :min="15" :max="60" />
-          </el-form-item>
-          <el-form-item label="最大處理段數（0=全部）">
-            <el-input-number v-model="form.max_segments" :min="0" :max="10000" />
-          </el-form-item>
-          <el-form-item label="每幾段共用一張圖">
-            <el-input-number v-model="form.segments_per_image" :min="1" :max="50" />
-          </el-form-item>
-        </div>
-        <div class="actions">
-          <el-button :loading="loading.segment" @click="runSegmentPreview">預覽分段</el-button>
-          <el-button type="primary" :loading="loading.analyze" :disabled="!canAnalyze" @click="runAnalyze">
-            AI 分析角色
-          </el-button>
-        </div>
-      </el-form>
+      <h2>文本输入</h2>
+      <el-input v-model="form.text" type="textarea" :rows="12" placeholder="粘贴小说文本" />
+      <div class="actions">
+        <el-button :loading="loading.segment" @click="runSegmentPreview">预览分段</el-button>
+        <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">分析角色</el-button>
+      </div>
       <el-alert
-        title="場景時長由音頻自動決定，無需手動設定"
-        type="success"
-        show-icon
-        :closable="false"
-      />
-      <el-alert
-        v-if="segments.length"
-        :title="`成本提示：文本共 ${segments.length} 段；實際處理 ${form.max_segments > 0 ? Math.min(segments.length, form.max_segments) : segments.length} 段；預估生成 ${estimatedImageCount} 張圖片（每 ${form.segments_per_image} 段共用一張）`"
+        v-if="segmentPreview.total_segments"
         type="warning"
         show-icon
         :closable="false"
+        :title="`成本提示：总句数 ${segmentPreview.total_sentences || '-'}，总分段 ${segmentPreview.total_segments}，实际处理 ${effectiveSegmentGroups}`"
       />
     </section>
 
-    <section v-if="segments.length" class="card">
-      <h2>分段預覽（{{ segments.length }} 段）</h2>
-      <p class="muted">
-        實際處理段數：{{ form.max_segments > 0 ? Math.min(segments.length, form.max_segments) : segments.length }}；
-        預估圖片數：{{ estimatedImageCount }}（每 {{ form.segments_per_image }} 段共用一張）
-      </p>
+    <section class="card" v-if="segmentPreview.total_segments">
+      <h2>分段预览</h2>
+      <p class="muted">当前规则：每 {{ form.sentences_per_segment }} 句为一段（句号/问号/叹号/分号/逗号都可切句）</p>
       <ol class="segments">
-        <li v-for="item in segments" :key="item.index">{{ item.text }}</li>
+        <li v-for="item in segmentPreview.segments" :key="item.index">
+          <strong>#{{ item.index + 1 }}</strong>
+          <span class="muted">（约 {{ item.sentence_count || '?' }} 句）</span>
+          <div>{{ item.text }}</div>
+        </li>
       </ol>
     </section>
 
     <section class="card">
-      <h2>3) 角色配置確認</h2>
-      <p class="muted">分析信心：{{ (confidence * 100).toFixed(0) }}%</p>
-      <el-table :data="characters" empty-text="尚未分析角色" style="width: 100%">
-        <el-table-column prop="name" label="角色名" width="130">
-          <template #default="scope">
-            <el-input v-model="scope.row.name" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="role" label="角色定位" width="120">
-          <template #default="scope">
-            <el-input v-model="scope.row.role" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="appearance" label="外貌描述">
-          <template #default="scope">
-            <el-input v-model="scope.row.appearance" type="textarea" :rows="2" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="personality" label="性格特點">
-          <template #default="scope">
-            <el-input v-model="scope.row.personality" type="textarea" :rows="2" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="suggested_voice" label="音色" width="190">
-          <template #default="scope">
-            <el-input v-model="scope.row.suggested_voice" />
-          </template>
-        </el-table-column>
-        <el-table-column prop="suggested_style" label="圖片風格" width="220">
-          <template #default="scope">
-            <el-input v-model="scope.row.suggested_style" />
-          </template>
-        </el-table-column>
-      </el-table>
-
+      <h2>角色配置（音色选择 + 参考图选择/上传/生成）</h2>
+      <p class="muted">分析置信度：{{ (confidence * 100).toFixed(0) }}%</p>
+      <div class="character-card" v-for="(character, index) in characters" :key="index">
+        <div class="grid">
+          <div>
+            <label>角色名</label>
+            <el-input v-model="character.name" />
+          </div>
+          <div>
+            <label>角色定位</label>
+            <el-input v-model="character.role" />
+          </div>
+          <div>
+            <label>TTS音色</label>
+            <el-select v-model="character.voice_id" style="width: 100%">
+              <el-option
+                v-for="voice in voices"
+                :key="voice.id"
+                :label="`${voice.name} (${voice.id})`"
+                :value="voice.id"
+              />
+            </el-select>
+          </div>
+          <div>
+            <label>参考图</label>
+            <el-select
+              :model-value="character.reference_image_path || ''"
+              style="width: 100%"
+              placeholder="选择已有参考图"
+              @change="(value) => bindRefImage(character, value)"
+            >
+              <el-option label="不使用参考图" value="" />
+              <el-option v-for="image in refImages" :key="image.path" :label="image.filename" :value="image.path" />
+            </el-select>
+          </div>
+        </div>
+        <div class="grid">
+          <div>
+            <label>外貌描述</label>
+            <el-input v-model="character.appearance" type="textarea" :rows="3" />
+          </div>
+          <div>
+            <label>性格描述</label>
+            <el-input v-model="character.personality" type="textarea" :rows="3" />
+          </div>
+          <div>
+            <label>角色Prompt（生成参考图时用）</label>
+            <el-input v-model="character.base_prompt" type="textarea" :rows="3" />
+          </div>
+        </div>
+        <div class="actions">
+          <label class="upload-btn">
+            <input type="file" accept="image/*" @change="(event) => uploadRefImage(event, character)" />
+            上传参考图
+          </label>
+          <el-button @click="generateRefImage(character)">生成角色参考图</el-button>
+        </div>
+        <img v-if="character.reference_image_url" :src="character.reference_image_url" class="ref-thumb" alt="reference" />
+      </div>
       <div class="actions">
-        <el-button @click="prevStep">上一步</el-button>
-        <el-button type="primary" :disabled="!characters.length" @click="confirmCharacters">確認角色配置</el-button>
+        <el-button type="primary" @click="confirmCharacters">确认角色配置</el-button>
       </div>
     </section>
 
     <section class="card">
-      <h2>4) 生成與下載</h2>
+      <h2>生成与预览</h2>
       <div class="actions">
-        <el-button type="primary" :loading="loading.generate" :disabled="!canGenerate" @click="runGenerate">
-          開始生成視頻
-        </el-button>
+        <el-button type="primary" :loading="loading.generate" @click="runGenerate">开始生成</el-button>
+        <el-button :disabled="!job.id" type="danger" @click="cancelCurrentJob">取消任务</el-button>
       </div>
 
       <div v-if="job.id" class="job">
-        <p><strong>任務ID：</strong>{{ job.id }}</p>
-        <p><strong>狀態：</strong>{{ job.status }} / {{ job.step }}</p>
-        <p><strong>訊息：</strong>{{ job.message }}</p>
+        <p><strong>任务ID：</strong>{{ job.id }}</p>
+        <p><strong>状态：</strong>{{ job.status }} / {{ job.step }}</p>
+        <p><strong>消息：</strong>{{ job.message }}</p>
         <el-progress :percentage="Math.round(job.progress * 100)" />
       </div>
 
-      <div v-if="job.videoUrl" class="preview">
-        <video :src="job.videoUrl" controls preload="metadata" class="video" />
-        <a :href="job.videoUrl" target="_blank" rel="noopener noreferrer">下載視頻</a>
+      <div v-if="job.clipPreviewUrls.length" class="clip-grid">
+        <div v-for="(url, index) in job.clipPreviewUrls" :key="index" class="clip-item">
+          <p>段落预览 #{{ index + 1 }}</p>
+          <video :src="url" controls preload="metadata" class="video" />
+        </div>
       </div>
+
+      <div v-if="job.videoUrl" class="preview">
+        <h3>最终视频</h3>
+        <video :src="job.videoUrl" controls preload="metadata" class="video" />
+        <a :href="job.videoUrl" target="_blank" rel="noopener noreferrer">下载最终视频</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>后端日志</h2>
+      <div class="actions">
+        <el-button :loading="loading.logs" @click="loadLogs">刷新日志</el-button>
+      </div>
+      <pre class="logs">{{ backendLogs.join('\n') }}</pre>
     </section>
   </div>
 </template>
+

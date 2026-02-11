@@ -31,7 +31,17 @@ class Settings(BaseSettings):
 
     output_dir: str = Field(default="outputs", alias="OUTPUT_DIR")
     temp_dir: str = Field(default="outputs/temp", alias="TEMP_DIR")
+    character_ref_dir: str = Field(default="assets/character_refs", alias="CHARACTER_REF_DIR")
+    log_dir: str = Field(default="logs", alias="LOG_DIR")
+    log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     cors_allow_origins: str = Field(default="*", alias="CORS_ALLOW_ORIGINS")
 
 
 settings = Settings()
+
+
+def project_path(raw: str) -> Path:
+    path = Path(raw)
+    if path.is_absolute():
+        return path
+    return PROJECT_ROOT / path

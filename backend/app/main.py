@@ -1,28 +1,48 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from .config import settings
+from .config import project_path, settings
+from .logging_setup import setup_logging
 from .models import (
     AnalyzeCharactersRequest,
     AnalyzeCharactersResponse,
+    CharacterImageItem,
     ConfirmCharactersRequest,
+    CreateCharacterImageRequest,
     GenerateVideoRequest,
     GenerateVideoResponse,
     SegmentItem,
     SegmentTextRequest,
     SegmentTextResponse,
 )
-from .services.llm_service import analyze_characters, segment_by_fixed, segment_by_sentence, segment_by_smart
+from .services.character_assets_service import (
+    create_character_reference_image,
+    list_character_reference_images,
+)
+from .services.llm_service import (
+    analyze_characters,
+    group_sentences,
+    segment_by_fixed,
+    segment_by_smart,
+    split_sentences,
+)
 from .services.model_service import get_models
-from .services.video_service import create_job
+from .services.video_service import cancel_job, create_job
 from .state import job_store
+from .voice_catalog import VOICE_INFOS
 
+
+setup_logging()
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title=settings.app_name)
 
@@ -35,15 +55,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-Path(settings.output_dir).mkdir(parents=True, exist_ok=True)
-Path(settings.temp_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.output_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.temp_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.character_ref_dir).mkdir(parents=True, exist_ok=True)
 
-app.mount("/outputs", StaticFiles(directory=settings.output_dir), name="outputs")
+app.mount("/outputs", StaticFiles(directory=project_path(settings.output_dir)), name="outputs")
+app.mount(
+    "/assets/character_refs",
+    StaticFiles(directory=project_path(settings.character_ref_dir)),
+    name="character_refs",
+)
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": f"internal error: {exc}"})
 
 
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/api/logs/tail")
+async def tail_logs(lines: int = 200) -> dict:
+    log_path = project_path(settings.log_dir) / "backend.log"
+    if not log_path.exists():
+        return {"lines": []}
+    all_lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    return {"lines": all_lines[-max(1, min(lines, 1000)) :]}
 
 
 @app.get("/api/models")
@@ -52,16 +93,16 @@ async def list_models() -> dict:
     return {"models": [item.model_dump() for item in models]}
 
 
+@app.get("/api/tts/voices")
+async def list_voices() -> dict:
+    return {"voices": [voice.model_dump() for voice in VOICE_INFOS]}
+
+
 @app.post("/api/analyze-characters", response_model=AnalyzeCharactersResponse)
 async def analyze_characters_api(payload: AnalyzeCharactersRequest) -> AnalyzeCharactersResponse:
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-
-    characters, confidence, model_used = await analyze_characters(
-        text=payload.text,
-        depth=payload.analysis_depth,
-        model_id=payload.model_id,
-    )
+    characters, confidence, model_used = await analyze_characters(payload.text, payload.analysis_depth, payload.model_id)
     return AnalyzeCharactersResponse(characters=characters, confidence=confidence, model_used=model_used)
 
 
@@ -78,24 +119,83 @@ async def segment_text(payload: SegmentTextRequest) -> SegmentTextResponse:
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    if payload.method == "sentence":
-        pieces = segment_by_sentence(text)
-    elif payload.method == "fixed":
+    total_sentences = len(split_sentences(text))
+    if payload.method == "fixed":
         pieces = segment_by_fixed(text, chunk_size=payload.fixed_size)
-    else:
+    elif payload.method == "smart":
         pieces = await segment_by_smart(text, payload.model_id)
+    else:
+        sentences = split_sentences(text)
+        pieces = group_sentences(sentences, payload.sentences_per_segment)
 
-    return SegmentTextResponse(segments=[SegmentItem(index=index, text=item) for index, item in enumerate(pieces)])
+    segments = []
+    for index, item in enumerate(pieces):
+        count = 0
+        if payload.method == "sentence":
+            count = len(split_sentences(item))
+        segments.append(SegmentItem(index=index, text=item, sentence_count=count))
+
+    return SegmentTextResponse(
+        segments=segments,
+        total_segments=len(segments),
+        total_sentences=total_sentences,
+    )
+
+
+@app.get("/api/character-reference-images")
+async def get_character_reference_images(request: Request) -> dict:
+    base_url = str(request.base_url).rstrip("/")
+    images = list_character_reference_images(base_url)
+    return {"images": [item.model_dump() for item in images]}
+
+
+@app.post("/api/character-reference-images/upload", response_model=CharacterImageItem)
+async def upload_character_reference_image(request: Request, file: UploadFile = File(...)) -> CharacterImageItem:
+    suffix = Path(file.filename or "image.png").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail="unsupported image format")
+
+    base_url = str(request.base_url).rstrip("/")
+    root = project_path(settings.character_ref_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    stem = Path(file.filename).stem.replace(" ", "_") or "upload"
+    dest = root / f"upload_{stem}_{uuid4().hex[:8]}{suffix}"
+    content = await file.read()
+    dest.write_bytes(content)
+
+    return CharacterImageItem(
+        path=dest.as_posix(),
+        url=f"{base_url}/assets/character_refs/{dest.name}",
+        filename=dest.name,
+    )
+
+
+@app.post("/api/character-reference-images/generate", response_model=CharacterImageItem)
+async def generate_character_reference_image(request: Request, payload: CreateCharacterImageRequest) -> CharacterImageItem:
+    base_url = str(request.base_url).rstrip("/")
+    try:
+        width_raw, height_raw = payload.resolution.lower().split("x")
+        resolution = (max(256, int(width_raw)), max(256, int(height_raw)))
+    except Exception:
+        resolution = (768, 768)
+    return await create_character_reference_image(payload.character_name, payload.prompt, resolution, base_url)
 
 
 @app.post("/api/generate-video", response_model=GenerateVideoResponse)
 async def generate_video(request: Request, payload: GenerateVideoRequest) -> GenerateVideoResponse:
     if not payload.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
-
     base_url = str(request.base_url).rstrip("/")
     job_id = create_job(payload=payload, base_url=base_url)
     return GenerateVideoResponse(job_id=job_id, status="queued")
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+async def cancel_video_job(request: Request, job_id: str) -> dict:
+    base_url = str(request.base_url).rstrip("/")
+    if not cancel_job(job_id, base_url):
+        raise HTTPException(status_code=404, detail="job not found")
+    return {"status": "cancel_requested", "job_id": job_id}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -113,9 +213,17 @@ async def get_job_video(job_id: str):
         raise HTTPException(status_code=404, detail="job not found")
     if status.status != "completed" or not status.output_video_path:
         raise HTTPException(status_code=409, detail="video not ready")
-
     path = Path(status.output_video_path)
     if not path.exists():
         raise HTTPException(status_code=404, detail="video missing")
     return FileResponse(path, media_type="video/mp4", filename=path.name)
 
+
+@app.get("/api/jobs/{job_id}/clips/{clip_index}")
+async def get_job_clip(job_id: str, clip_index: int):
+    if clip_index < 0:
+        raise HTTPException(status_code=400, detail="clip_index must be >= 0")
+    clip_path = project_path(settings.temp_dir) / job_id / "clips" / f"clip_{clip_index:04d}.mp4"
+    if not clip_path.exists():
+        raise HTTPException(status_code=404, detail="clip not found")
+    return FileResponse(clip_path, media_type="video/mp4", filename=clip_path.name)

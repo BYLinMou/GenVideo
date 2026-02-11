@@ -1,55 +1,35 @@
 # GenVideo
 
-Novel-to-video generation system with full backend + frontend implementation.
+Novel-to-video generation system (FastAPI + Vue 3), updated for the current workflow:
 
-## Features
+- Better backend logging and error visibility
+- Cancelable video jobs
+- Segment-clip preview before final video
+- Sentence-based grouping semantics
+- Character reference-image library (select/upload/generate)
+- Per-character TTS voice selection from real voice list
 
-- Dynamic LLM model list (`/api/models`)
-- AI character analysis + editable character config
-- Text segmentation (`sentence` / `fixed` / `smart`)
-- Video generation pipeline (image + TTS + subtitles)
-- Job polling and video download
-- Cost-aware image grouping: multiple segments can reuse one image
+## Workflow (Current)
 
-## Project Structure
+1. Input novel text
+2. Segment preview (sentence-aware)
+3. Analyze characters
+4. Confirm characters (voice + reference image)
+5. Generate clips and final video
+6. Preview each clip and download final video
 
-- `backend/` FastAPI + MoviePy services
-- `frontend/` Vue 3 + Element Plus + Vite
-- `plans/` planning docs
+## Core Semantics (Important)
 
-## Requirements
+- Sentence splitting supports punctuation: `。！？!?；;，,`
+- `sentences_per_segment = N` means **N sentences per segment group**
+- One segment group generates one clip
+- One segment group generates one image prompt call (reference image is passed when available)
+- `max_segment_groups = 0` means process all groups
+- `max_segment_groups = 2` with `sentences_per_segment = 5` means process up to `2 * 5 = 10` sentences
 
-1. Python 3.11+
-2. Node.js 18+
-3. FFmpeg (required by MoviePy)
+## Backend
 
-## Environment Config
-
-Copy `.env.example` to `.env` (or use `.env.local`).
-
-Required:
-
-- `LLM_API_KEY`
-- `LLM_API_BASE_URL`
-- `IMAGE_API_KEY`
-- `IMAGE_API_URL`
-
-Optional:
-
-- `LLM_DEFAULT_MODEL`
-- `IMAGE_MODEL`
-- `TTS_API_URL` (if empty, fallback to `edge-tts`)
-
-### Segment/Image Rules
-
-- `max_segments` (request/frontend): max rendered segments per job.
-  - `0` means process all segments.
-  - Example: if segmentation returns 50 and `max_segments=20`, only first 20 are rendered.
-- `segments_per_image` (request/frontend): how many segments share one generated image.
-  - Default: `5`
-  - Example: 50 segments with `segments_per_image=5` => about 10 generated images.
-
-## Run Backend
+### Start
 
 ```bash
 cd backend
@@ -59,9 +39,29 @@ pip install -r requirements.txt
 python run.py
 ```
 
-Backend default: `http://localhost:8000`
+Default: `http://localhost:8000`
 
-## Run Frontend
+### Key APIs
+
+- `GET /api/health`
+- `GET /api/models`
+- `GET /api/tts/voices`
+- `GET /api/logs/tail?lines=200`
+- `POST /api/analyze-characters`
+- `POST /api/confirm-characters`
+- `POST /api/segment-text`
+- `GET /api/character-reference-images`
+- `POST /api/character-reference-images/upload`
+- `POST /api/character-reference-images/generate`
+- `POST /api/generate-video`
+- `POST /api/jobs/{job_id}/cancel`
+- `GET /api/jobs/{job_id}`
+- `GET /api/jobs/{job_id}/clips/{clip_index}`
+- `GET /api/jobs/{job_id}/video`
+
+## Frontend
+
+### Start
 
 ```bash
 cd frontend
@@ -69,32 +69,21 @@ npm install
 npm run dev
 ```
 
-Frontend default: `http://localhost:5173`
+Default: `http://localhost:5173`
 
-## Main APIs
+## Environment
 
-- `GET /api/health`
-- `GET /api/models`
-- `POST /api/analyze-characters`
-- `POST /api/confirm-characters`
-- `POST /api/segment-text`
-- `POST /api/generate-video`
-- `GET /api/jobs/{job_id}`
-- `GET /api/jobs/{job_id}/video`
+See `.env.example`.
 
-### `POST /api/generate-video` key fields
+Important paths:
 
-- `text`
-- `characters`
-- `segment_method`
-- `max_segments` (default 0 = all)
-- `segments_per_image` (default 5)
-- `resolution`
-- `subtitle_style`
-- `fps`
-- `model_id`
+- `OUTPUT_DIR`: final videos
+- `TEMP_DIR`: per-job clip assets
+- `CHARACTER_REF_DIR`: reusable character reference image library
+- `LOG_DIR`: backend log files
 
 ## Notes
 
-- If image API/TTS fails, backend uses fallback strategies (placeholder image/silent audio) so flow remains testable.
-- Output files are under `outputs/`.
+- If LLM/image/TTS API partially fails, fallback paths are used where possible.
+- Backend exceptions are logged to `logs/backend.log` and can be viewed in frontend via `/api/logs/tail`.
+

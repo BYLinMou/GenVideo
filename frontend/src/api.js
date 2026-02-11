@@ -12,7 +12,6 @@ async function parseJson(response) {
 async function request(path, options = {}) {
   const response = await fetch(`${BASE}${path}`, {
     headers: {
-      'Content-Type': 'application/json',
       ...(options.headers || {})
     },
     ...options
@@ -25,6 +24,14 @@ async function request(path, options = {}) {
   return data
 }
 
+function jsonRequest(path, method, payload) {
+  return request(path, {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    body: payload ? JSON.stringify(payload) : undefined
+  })
+}
+
 export const api = {
   health() {
     return request('/api/health')
@@ -32,35 +39,54 @@ export const api = {
   getModels() {
     return request('/api/models')
   },
+  getVoices() {
+    return request('/api/tts/voices')
+  },
+  getLogs(lines = 200) {
+    return request(`/api/logs/tail?lines=${lines}`)
+  },
   analyzeCharacters(payload) {
-    return request('/api/analyze-characters', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+    return jsonRequest('/api/analyze-characters', 'POST', payload)
   },
   confirmCharacters(payload) {
-    return request('/api/confirm-characters', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+    return jsonRequest('/api/confirm-characters', 'POST', payload)
   },
   segmentText(payload) {
-    return request('/api/segment-text', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+    return jsonRequest('/api/segment-text', 'POST', payload)
   },
   generateVideo(payload) {
-    return request('/api/generate-video', {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    })
+    return jsonRequest('/api/generate-video', 'POST', payload)
+  },
+  cancelJob(jobId) {
+    return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
   },
   getJob(jobId) {
     return request(`/api/jobs/${jobId}`)
   },
   getVideoUrl(jobId) {
     return `${BASE}/api/jobs/${jobId}/video`
+  },
+  getClipUrl(jobId, clipIndex) {
+    return `${BASE}/api/jobs/${jobId}/clips/${clipIndex}`
+  },
+  listCharacterRefImages() {
+    return request('/api/character-reference-images')
+  },
+  async uploadCharacterRefImage(file) {
+    const form = new FormData()
+    form.append('file', file)
+    return request('/api/character-reference-images/upload', {
+      method: 'POST',
+      body: form
+    })
+  },
+  generateCharacterRefImage(payload) {
+    return jsonRequest('/api/character-reference-images/generate', 'POST', payload)
+  },
+  getCharacterRefImageUrl(path) {
+    const normalized = path.replaceAll('\\', '/')
+    const filename = normalized.split('/').pop()
+    return `${BASE}/assets/character_refs/${filename}`
   }
 }
 

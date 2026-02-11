@@ -14,14 +14,23 @@ class ModelInfo(BaseModel):
     available: bool = False
 
 
+class VoiceInfo(BaseModel):
+    id: str
+    name: str
+    gender: str
+    age: str
+    description: str
+
+
 class CharacterSuggestion(BaseModel):
     name: str
     role: str = "配角"
     importance: int = 5
     appearance: str = ""
     personality: str = ""
-    suggested_voice: str = "zh-CN-YunxiNeural"
-    suggested_style: str = "anime style"
+    voice_id: str = "zh-CN-YunxiNeural"
+    reference_image_path: str | None = None
+    reference_image_url: str | None = None
     base_prompt: str = ""
 
 
@@ -43,29 +52,33 @@ class ConfirmCharactersRequest(BaseModel):
 
 class SegmentTextRequest(BaseModel):
     text: str
-    method: Literal["sentence", "fixed", "smart"] = "smart"
-    fixed_size: int = 120
+    method: Literal["sentence", "fixed", "smart"] = "sentence"
+    fixed_size: int = Field(default=120, ge=20, le=1000)
+    sentences_per_segment: int = Field(default=5, ge=1, le=50)
     model_id: str | None = None
 
 
 class SegmentItem(BaseModel):
     index: int
     text: str
+    sentence_count: int = 0
 
 
 class SegmentTextResponse(BaseModel):
     segments: list[SegmentItem]
+    total_segments: int
+    total_sentences: int
 
 
 class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
-    segment_method: Literal["sentence", "fixed", "smart"] = "smart"
-    max_segments: int = Field(default=0, ge=0, le=10000)
-    segments_per_image: int = Field(default=5, ge=1, le=50)
+    segment_method: Literal["sentence", "fixed", "smart"] = "sentence"
+    sentences_per_segment: int = Field(default=5, ge=1, le=50)
+    max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1080x1920"
     subtitle_style: Literal["basic", "highlight", "danmaku", "center"] = "highlight"
-    fps: int = 30
+    fps: int = Field(default=30, ge=15, le=60)
     model_id: str | None = None
 
 
@@ -76,9 +89,25 @@ class GenerateVideoResponse(BaseModel):
 
 class JobStatus(BaseModel):
     job_id: str
-    status: str
+    status: Literal["queued", "running", "completed", "failed", "cancelled"]
     progress: float = 0.0
     step: str = ""
     message: str = ""
     output_video_url: str | None = None
     output_video_path: str | None = None
+    clip_count: int = 0
+    clip_preview_urls: list[str] = Field(default_factory=list)
+
+
+class CreateCharacterImageRequest(BaseModel):
+    character_name: str
+    prompt: str
+    model_id: str | None = None
+    resolution: str = "768x768"
+
+
+class CharacterImageItem(BaseModel):
+    path: str
+    url: str
+    filename: str
+

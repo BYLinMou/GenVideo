@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import re
 from io import BytesIO
 from pathlib import Path
@@ -33,11 +34,30 @@ async def _placeholder_image(prompt: str, output_path: Path, size: tuple[int, in
     return output_path
 
 
-def _build_messages(prompt: str) -> list[dict]:
+def _build_messages(prompt: str, reference_image_path: str | None = None) -> list[dict]:
+    if reference_image_path:
+        ref = Path(reference_image_path)
+        if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            mime = "image/png" if ref.suffix.lower() == ".png" else "image/jpeg"
+            encoded = base64.b64encode(ref.read_bytes()).decode("utf-8")
+            return [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
+                    ],
+                }
+            ]
     return [{"role": "user", "content": prompt}]
 
 
-async def generate_image(prompt: str, output_path: Path, resolution: tuple[int, int]) -> Path:
+async def generate_image(
+    prompt: str,
+    output_path: Path,
+    resolution: tuple[int, int],
+    reference_image_path: str | None = None,
+) -> Path:
     if not settings.image_api_key:
         return await _placeholder_image(prompt, output_path, resolution)
 
@@ -47,7 +67,7 @@ async def generate_image(prompt: str, output_path: Path, resolution: tuple[int, 
     }
     payload = {
         "model": settings.image_model,
-        "messages": _build_messages(prompt),
+        "messages": _build_messages(prompt, reference_image_path=reference_image_path),
         "stream": True,
     }
     url = f"{settings.image_api_url.rstrip('/')}/chat/completions"
@@ -96,4 +116,28 @@ async def generate_image(prompt: str, output_path: Path, resolution: tuple[int, 
     try:
         return await asyncio.wait_for(_remote_generate(), timeout=45)
     except Exception:
+        return await _placeholder_image(prompt, output_path, resolution)
+
+
+async def use_reference_or_generate(
+    prompt: str,
+    output_path: Path,
+    resolution: tuple[int, int],
+    reference_image_path: str | None,
+) -> Path:
+    try:
+        return await generate_image(
+            prompt=prompt,
+            output_path=output_path,
+            resolution=resolution,
+            reference_image_path=reference_image_path,
+        )
+    except Exception:
+        if reference_image_path:
+            ref = Path(reference_image_path)
+            if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                img = Image.open(ref).convert("RGB").resize(resolution)
+                img.save(output_path)
+                return output_path
         return await _placeholder_image(prompt, output_path, resolution)
