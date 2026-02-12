@@ -53,7 +53,8 @@ const confidence = ref(0)
 const segmentPreview = reactive({
   total_segments: 0,
   total_sentences: 0,
-  segments: []
+  segments: [],
+  request_signature: ''
 })
 
 const backendLogs = ref([])
@@ -761,6 +762,7 @@ async function runSegmentPreview() {
     segmentPreview.total_segments = data.total_segments || 0
     segmentPreview.total_sentences = data.total_sentences || 0
     segmentPreview.segments = data.segments || []
+    segmentPreview.request_signature = data.request_signature || ''
     ElMessage.success(
       t('toast.segmentSuccess', {
         segments: segmentPreview.total_segments,
@@ -849,6 +851,10 @@ async function runGenerate() {
       text: textForRun,
       characters: characters.value,
       segment_method: form.segment_method,
+      segment_request_signature: segmentPreview.request_signature || null,
+      precomputed_segments: Array.isArray(segmentPreview.segments)
+        ? segmentPreview.segments.map((item) => String(item?.text || '').trim()).filter(Boolean)
+        : null,
       sentences_per_segment: form.sentences_per_segment,
       max_segment_groups: form.max_segment_groups,
       resolution: form.resolution,

@@ -79,12 +79,15 @@ class SegmentTextResponse(BaseModel):
     segments: list[SegmentItem]
     total_segments: int
     total_sentences: int
+    request_signature: str = ""
 
 
 class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
     segment_method: Literal["sentence", "fixed", "smart"] = "sentence"
+    segment_request_signature: str | None = None
+    precomputed_segments: list[str] | None = None
     sentences_per_segment: int = Field(default=5, ge=1, le=50)
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1920x1080"

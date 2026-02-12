@@ -23,11 +23,8 @@ from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
-    group_sentences,
-    segment_by_fixed,
-    segment_by_smart,
-    split_sentences,
 )
+from .segmentation_service import build_segment_plan, resolve_precomputed_segments
 from .scene_cache_service import (
     build_scene_descriptor,
     ensure_scene_cache_paths,
@@ -1228,17 +1225,36 @@ def _render_final_sync(
 
 
 async def _segment_text(payload: GenerateVideoRequest) -> tuple[list[str], int]:
-    if payload.segment_method == "fixed":
-        segments = segment_by_fixed(payload.text)
-        return segments, 0
+    precomputed = resolve_precomputed_segments(
+        text=payload.text,
+        method=payload.segment_method,
+        sentences_per_segment=payload.sentences_per_segment,
+        fixed_size=120,
+        model_id=payload.model_id,
+        request_signature=payload.segment_request_signature,
+        precomputed_segments=payload.precomputed_segments,
+    )
+    if precomputed:
+        total_sentences = 0
+        if payload.segment_method == "sentence":
+            plan = await build_segment_plan(
+                text=payload.text,
+                method="sentence",
+                sentences_per_segment=payload.sentences_per_segment,
+                fixed_size=120,
+                model_id=payload.model_id,
+            )
+            total_sentences = plan.total_sentences
+        return precomputed, total_sentences
 
-    if payload.segment_method == "smart":
-        segments = await segment_by_smart(payload.text, payload.model_id)
-        return segments, 0
-
-    sentences = split_sentences(payload.text)
-    segments = group_sentences(sentences, payload.sentences_per_segment)
-    return segments, len(sentences)
+    plan = await build_segment_plan(
+        text=payload.text,
+        method=payload.segment_method,
+        sentences_per_segment=payload.sentences_per_segment,
+        fixed_size=120,
+        model_id=payload.model_id,
+    )
+    return plan.segments, plan.total_sentences
 
 
 def _update_job(
