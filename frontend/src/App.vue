@@ -1633,8 +1633,9 @@ onUnmounted(() => {
           :key="item.id"
           class="job-list-item"
           :class="{ active: item.id === activeJobId }"
+          @click="openJob(item.id)"
         >
-          <div class="job-list-main" @click="openJob(item.id)">
+          <div class="job-list-main">
             <div class="job-list-id">{{ item.id }}</div>
             <div class="job-list-meta">
               <span>{{ item.status }}</span>
@@ -1643,7 +1644,7 @@ onUnmounted(() => {
               <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
             </div>
           </div>
-          <el-button size="small" type="danger" plain @click="removeJob(item.id)">移除</el-button>
+          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">移除</el-button>
         </div>
       </div>
 

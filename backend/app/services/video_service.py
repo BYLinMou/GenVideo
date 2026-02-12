@@ -1632,7 +1632,11 @@ def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
     _update_job(job_id, base_url, "queued", 0.0, "queued", "Job queued")
 
     def runner() -> None:
-        asyncio.run(run_video_job(job_id=job_id, payload=payload, base_url=base_url))
+        try:
+            asyncio.run(run_video_job(job_id=job_id, payload=payload, base_url=base_url))
+        except Exception as exc:
+            logger.exception("Job runner crashed before async job handler completed: %s", job_id)
+            _update_job(job_id, base_url, "failed", 1.0, "error", f"Video generation failed: {exc}")
 
     thread = Thread(target=runner, daemon=True)
     thread.start()

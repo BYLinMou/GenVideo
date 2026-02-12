@@ -35,6 +35,7 @@ async function parseJson(response) {
 
 async function request(path, options = {}) {
   const response = await fetch(buildApiUrl(path), {
+    cache: options.cache || 'no-store',
     headers: {
       ...(options.headers || {})
     },
@@ -103,7 +104,7 @@ export const api = {
     return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
   },
   getJob(jobId) {
-    return request(`/api/jobs/${jobId}`)
+    return request(`/api/jobs/${jobId}?_ts=${Date.now()}`, { cache: 'no-store' })
   },
   getVideoUrl(jobId) {
     return buildApiUrl(`/api/jobs/${jobId}/video`)
