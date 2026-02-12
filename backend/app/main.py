@@ -224,8 +224,7 @@ async def segment_text(payload: SegmentTextRequest) -> SegmentTextResponse:
 
 @app.get("/api/character-reference-images")
 async def get_character_reference_images(request: Request) -> dict:
-    base_url = str(request.base_url).rstrip("/")
-    images = list_character_reference_images(base_url)
+    images = list_character_reference_images()
     return {"images": [item.model_dump() for item in images]}
 
 
@@ -235,7 +234,6 @@ async def upload_character_reference_image(request: Request, file: UploadFile = 
     if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
         raise HTTPException(status_code=400, detail="unsupported image format")
 
-    base_url = str(request.base_url).rstrip("/")
     root = project_path(settings.character_ref_dir)
     root.mkdir(parents=True, exist_ok=True)
     stem = Path(file.filename).stem.replace(" ", "_") or "upload"
@@ -245,20 +243,19 @@ async def upload_character_reference_image(request: Request, file: UploadFile = 
 
     return CharacterImageItem(
         path=dest.as_posix(),
-        url=f"{base_url}/assets/character_refs/{quote(dest.name)}",
+        url=f"/assets/character_refs/{quote(dest.name)}",
         filename=dest.name,
     )
 
 
 @app.post("/api/character-reference-images/generate", response_model=CharacterImageItem)
 async def generate_character_reference_image(request: Request, payload: CreateCharacterImageRequest) -> CharacterImageItem:
-    base_url = str(request.base_url).rstrip("/")
     try:
         width_raw, height_raw = payload.resolution.lower().split("x")
         resolution = (max(256, int(width_raw)), max(256, int(height_raw)))
     except Exception:
         resolution = (768, 768)
-    return await create_character_reference_image(payload.character_name, payload.prompt, resolution, base_url)
+    return await create_character_reference_image(payload.character_name, payload.prompt, resolution)
 
 
 @app.post("/api/bgm/upload", response_model=BgmUploadResponse)
@@ -312,14 +309,13 @@ async def upload_watermark(file: UploadFile = File(...)) -> dict:
 
 @app.get("/api/bgm/library")
 async def list_bgm_library(request: Request) -> dict:
-    base_url = str(request.base_url).rstrip("/")
     items: list[BgmLibraryItem] = []
     for path in sorted(_bgm_root().glob("*.mp3")):
         stat = path.stat()
         items.append(
             BgmLibraryItem(
                 path=path.as_posix(),
-                url=f"{base_url}/assets/bgm/{quote(path.name)}",
+                url=f"/assets/bgm/{quote(path.name)}",
                 filename=path.name,
                 size=int(stat.st_size),
                 updated_at=datetime.fromtimestamp(stat.st_mtime).isoformat(timespec="seconds"),

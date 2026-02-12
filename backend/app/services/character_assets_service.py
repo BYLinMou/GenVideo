@@ -29,7 +29,7 @@ def _build_character_reference_prompt(prompt: str) -> str:
     return f"{base}. {full_body_rules}"
 
 
-def list_character_reference_images(base_url: str) -> list[CharacterImageItem]:
+def list_character_reference_images() -> list[CharacterImageItem]:
     root = project_path(settings.character_ref_dir)
     root.mkdir(parents=True, exist_ok=True)
     result: list[CharacterImageItem] = []
@@ -41,7 +41,7 @@ def list_character_reference_images(base_url: str) -> list[CharacterImageItem]:
         result.append(
             CharacterImageItem(
                 path=rel,
-                url=f"{base_url}/assets/character_refs/{encoded_name}",
+                url=f"/assets/character_refs/{encoded_name}",
                 filename=path.name,
             )
         )
@@ -52,7 +52,6 @@ async def create_character_reference_image(
     character_name: str,
     prompt: str,
     resolution: tuple[int, int],
-    base_url: str,
 ) -> CharacterImageItem:
     root = project_path(settings.character_ref_dir)
     root.mkdir(parents=True, exist_ok=True)
@@ -67,6 +66,6 @@ async def create_character_reference_image(
     encoded_name = quote(filename)
     return CharacterImageItem(
         path=rel,
-        url=f"{base_url}/assets/character_refs/{encoded_name}",
+        url=f"/assets/character_refs/{encoded_name}",
         filename=filename,
     )

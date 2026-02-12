@@ -606,7 +606,26 @@ function closeBgmPicker() {
 }
 
 function resolveRefImageUrl(image) {
-  return image.url || api.getCharacterRefImageUrl(image.path)
+  const rawUrl = (image?.url || '').trim()
+  if (!rawUrl) {
+    return api.getCharacterRefImageUrl(image.path)
+  }
+
+  if (rawUrl.startsWith('/')) {
+    return `${window.location.origin}${rawUrl}`
+  }
+
+  try {
+    const parsed = new URL(rawUrl)
+    if (window.location.hostname && parsed.hostname && parsed.hostname !== window.location.hostname) {
+      if (parsed.pathname.startsWith('/assets/')) {
+        return `${window.location.origin}${parsed.pathname}`
+      }
+    }
+    return rawUrl
+  } catch {
+    return rawUrl
+  }
 }
 
 function pickRefImage(image) {
