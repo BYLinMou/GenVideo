@@ -37,6 +37,12 @@ const form = reactive({
   render_mode: 'balanced',
   bgm_enabled: true,
   bgm_volume: 0.08,
+  novel_alias: '',
+  watermark_enabled: false,
+  watermark_type: 'text',
+  watermark_text: '',
+  watermark_image_path: '',
+  watermark_opacity: 0.6,
   enable_scene_image_reuse: true,
   scene_reuse_no_repeat_window: 3
 })
@@ -58,8 +64,30 @@ const job = reactive({
   progress: 0,
   step: '',
   message: '',
+  currentSegment: 0,
+  totalSegments: 0,
   videoUrl: '',
   clipPreviewUrls: []
+})
+
+const uiProgressPercent = computed(() => {
+  const raw = Number(job.progress || 0)
+  const ratio = Number.isFinite(raw) ? Math.min(Math.max(raw, 0), 1) : 0
+  return Math.round(ratio * 100)
+})
+
+const sceneProgressPercent = computed(() => {
+  const total = Math.max(0, Number(job.totalSegments || 0))
+  const current = Math.max(0, Number(job.currentSegment || 0))
+  if (!total) return 0
+  return Math.min(100, Math.round((Math.min(current, total) / total) * 100))
+})
+
+const sceneProgressText = computed(() => {
+  const total = Math.max(0, Number(job.totalSegments || 0))
+  const current = Math.max(0, Number(job.currentSegment || 0))
+  if (!total) return '未开始'
+  return `Scene ${Math.min(current, total)}/${total}`
 })
 
 const bgmStatus = reactive({
@@ -70,7 +98,19 @@ const bgmStatus = reactive({
   source_filename: ''
 })
 
+const JOB_IDS_STORAGE_KEY = 'genvideo_job_ids_v1'
+const ACTIVE_JOB_ID_STORAGE_KEY = 'genvideo_active_job_id_v1'
+
 let pollingTimer = null
+let pollingBusy = false
+
+const jobs = ref([])
+const activeJobId = ref('')
+const recoverJobIdInput = ref('')
+
+const sortedJobs = computed(() => {
+  return [...jobs.value].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+})
 
 const effectiveSegmentGroups = computed(() => {
   if (!segmentPreview.total_segments) return 0
@@ -388,8 +428,163 @@ function resetJob() {
   job.progress = 0
   job.step = ''
   job.message = ''
+  job.currentSegment = 0
+  job.totalSegments = 0
   job.videoUrl = ''
   job.clipPreviewUrls = []
+}
+
+function createLocalJobRecord(jobId) {
+  return {
+    id: String(jobId || ''),
+    status: 'queued',
+    step: 'queued',
+    message: 'Job queued',
+    progress: 0,
+    currentSegment: 0,
+    totalSegments: 0,
+    videoUrl: '',
+    clipPreviewUrls: [],
+    updatedAt: Date.now(),
+    createdAt: Date.now()
+  }
+}
+
+function upsertJobRecord(record) {
+  if (!record?.id) return
+  const id = String(record.id)
+  const list = jobs.value
+  const index = list.findIndex((item) => item.id === id)
+  const now = Date.now()
+  const merged = {
+    ...(index >= 0 ? list[index] : createLocalJobRecord(id)),
+    ...record,
+    id,
+    updatedAt: Number(record.updatedAt || now)
+  }
+
+  if (index >= 0) {
+    list[index] = merged
+  } else {
+    list.push(merged)
+  }
+}
+
+function removeJobRecord(jobId) {
+  const id = String(jobId || '')
+  if (!id) return
+  jobs.value = jobs.value.filter((item) => item.id !== id)
+  if (activeJobId.value === id) {
+    activeJobId.value = jobs.value[0]?.id || ''
+  }
+}
+
+function syncJobViewFromRecord(record) {
+  if (!record) {
+    resetJob()
+    return
+  }
+  job.id = record.id || ''
+  job.status = record.status || ''
+  job.progress = Number(record.progress || 0)
+  job.step = record.step || ''
+  job.message = record.message || ''
+  job.currentSegment = Number(record.currentSegment || 0)
+  job.totalSegments = Number(record.totalSegments || 0)
+  job.videoUrl = record.videoUrl || ''
+  job.clipPreviewUrls = record.clipPreviewUrls || []
+}
+
+function selectJob(jobId) {
+  const id = String(jobId || '')
+  if (!id) return
+  activeJobId.value = id
+  const found = jobs.value.find((item) => item.id === id)
+  if (found) {
+    syncJobViewFromRecord(found)
+  }
+}
+
+function syncActiveJobRecordFromApiStatus(jobId, status) {
+  const id = String(jobId || '')
+  if (!id || !status) return null
+  const next = {
+    id,
+    status: status.status || '',
+    step: status.step || '',
+    message: status.message || '',
+    progress: Number(status.progress || 0),
+    currentSegment: Number(status.current_segment || 0),
+    totalSegments: Number(status.total_segments || 0),
+    clipPreviewUrls: status.clip_preview_urls || [],
+    videoUrl: status.status === 'completed' ? api.getVideoUrl(id) : '',
+    updatedAt: Date.now()
+  }
+  upsertJobRecord(next)
+  if (activeJobId.value === id) {
+    syncJobViewFromRecord(next)
+  }
+  return next
+}
+
+function persistJobSnapshot() {
+  if (typeof window === 'undefined') return
+  const payload = jobs.value
+    .slice(0, 100)
+    .map((item) => ({
+      id: item.id,
+      status: item.status,
+      step: item.step,
+      message: item.message,
+      progress: Number(item.progress || 0),
+      currentSegment: Number(item.currentSegment || 0),
+      totalSegments: Number(item.totalSegments || 0),
+      videoUrl: item.videoUrl || '',
+      clipPreviewUrls: item.clipPreviewUrls || [],
+      updatedAt: Number(item.updatedAt || Date.now()),
+      createdAt: Number(item.createdAt || Date.now())
+    }))
+  window.localStorage.setItem(JOB_IDS_STORAGE_KEY, JSON.stringify(payload))
+  window.localStorage.setItem(ACTIVE_JOB_ID_STORAGE_KEY, activeJobId.value || '')
+}
+
+function restoreJobSnapshot() {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(JOB_IDS_STORAGE_KEY)
+    const parsed = raw ? JSON.parse(raw) : []
+    if (!Array.isArray(parsed)) return
+    jobs.value = parsed
+      .filter((item) => item && item.id)
+      .map((item) => ({
+        id: String(item.id),
+        status: item.status || '',
+        step: item.step || '',
+        message: item.message || '',
+        progress: Number(item.progress || 0),
+        currentSegment: Number(item.currentSegment || 0),
+        totalSegments: Number(item.totalSegments || 0),
+        videoUrl: item.videoUrl || '',
+        clipPreviewUrls: Array.isArray(item.clipPreviewUrls) ? item.clipPreviewUrls : [],
+        updatedAt: Number(item.updatedAt || Date.now()),
+        createdAt: Number(item.createdAt || Date.now())
+      }))
+
+    const savedActive = window.localStorage.getItem(ACTIVE_JOB_ID_STORAGE_KEY) || ''
+    if (savedActive && jobs.value.some((item) => item.id === savedActive)) {
+      activeJobId.value = savedActive
+    } else {
+      activeJobId.value = jobs.value[0]?.id || ''
+    }
+
+    if (activeJobId.value) {
+      const record = jobs.value.find((item) => item.id === activeJobId.value)
+      if (record) syncJobViewFromRecord(record)
+    }
+  } catch {
+    jobs.value = []
+    activeJobId.value = ''
+  }
 }
 
 function openRefPicker(index) {
@@ -551,35 +746,44 @@ function stopPolling() {
   }
 }
 
+async function pollJobsOnce() {
+  if (pollingBusy) return
+  const ids = jobs.value.map((item) => String(item.id || '')).filter(Boolean)
+  if (!ids.length) return
+
+  pollingBusy = true
+  try {
+    await Promise.all(
+      ids.map(async (id) => {
+        try {
+          const status = await api.getJob(id)
+          const updated = syncActiveJobRecordFromApiStatus(id, status)
+          if (!updated) return
+
+          if (status.status === 'completed') {
+            upsertJobRecord({ id, videoUrl: api.getVideoUrl(id), updatedAt: Date.now() })
+            if (activeJobId.value === id) {
+              job.videoUrl = api.getVideoUrl(id)
+            }
+          }
+        } catch (error) {
+          const msg = String(error?.message || '')
+          if (msg.includes('404')) {
+            removeJobRecord(id)
+          }
+        }
+      })
+    )
+  } finally {
+    pollingBusy = false
+    persistJobSnapshot()
+  }
+}
+
 function startPolling() {
   stopPolling()
-  pollingTimer = setInterval(async () => {
-    if (!job.id) return
-    try {
-      const status = await api.getJob(job.id)
-      job.status = status.status
-      job.progress = Number(status.progress || 0)
-      job.step = status.step || ''
-      job.message = status.message || ''
-      job.clipPreviewUrls = status.clip_preview_urls || []
-
-      if (status.status === 'completed') {
-        job.videoUrl = api.getVideoUrl(job.id)
-        stopPolling()
-        loading.generate = false
-        ElMessage.success(t('toast.completed'))
-      }
-      if (status.status === 'failed' || status.status === 'cancelled') {
-        stopPolling()
-        loading.generate = false
-        ElMessage.warning(status.message || status.status)
-      }
-    } catch (error) {
-      stopPolling()
-      loading.generate = false
-      ElMessage.error(t('toast.statusFailed', { error: error.message }))
-    }
-  }, 1500)
+  pollingTimer = setInterval(pollJobsOnce, 1500)
+  void pollJobsOnce()
 }
 
 async function runGenerate() {
@@ -594,7 +798,6 @@ async function runGenerate() {
   }
 
   loading.generate = true
-  resetJob()
 
   try {
     const payload = {
@@ -610,6 +813,12 @@ async function runGenerate() {
       render_mode: form.render_mode,
       bgm_enabled: form.bgm_enabled,
       bgm_volume: form.bgm_volume,
+      novel_alias: form.novel_alias || null,
+      watermark_enabled: form.watermark_enabled,
+      watermark_type: form.watermark_type,
+      watermark_text: form.watermark_text || null,
+      watermark_image_path: form.watermark_image_path || null,
+      watermark_opacity: form.watermark_opacity,
       model_id: selectedModel.value || null,
       enable_scene_image_reuse: form.enable_scene_image_reuse
     }
@@ -618,21 +827,35 @@ async function runGenerate() {
       payload.image_aspect_ratio = form.image_aspect_ratio
     }
     const data = await api.generateVideo(payload)
-    job.id = data.job_id
-    job.status = data.status
+    const id = String(data.job_id || '')
+    if (!id) {
+      throw new Error('missing job_id')
+    }
+    upsertJobRecord({
+      ...createLocalJobRecord(id),
+      status: data.status || 'queued',
+      step: data.status || 'queued',
+      message: 'Job queued',
+      updatedAt: Date.now()
+    })
+    selectJob(id)
+    persistJobSnapshot()
     startPolling()
-    ElMessage.success(t('toast.queued'))
+    ElMessage.success(`${t('toast.queued')} | JobID: ${id}`)
   } catch (error) {
     loading.generate = false
     ElMessage.error(t('toast.generateFailed', { error: error.message }))
+    return
   }
+  loading.generate = false
 }
 
 async function cancelCurrentJob() {
-  if (!job.id) return
+  if (!activeJobId.value) return
   try {
-    await api.cancelJob(job.id)
+    await api.cancelJob(activeJobId.value)
     ElMessage.success(t('toast.cancelSuccess'))
+    await pollJobsOnce()
   } catch (error) {
     ElMessage.error(t('toast.cancelFailed', { error: error.message }))
   }
@@ -702,19 +925,7 @@ async function generateNovelAliases() {
 
 function applyAlias(alias) {
   if (!alias) return
-  const lines = (form.text || '').split('\n')
-  const titleLinePattern = /^\s*(书名|标题|小说名|小说标题)\s*[：:]/
-
-  const next = [...lines]
-  const titleIndex = next.findIndex((line) => titleLinePattern.test(line))
-  const titleLine = `书名：${alias}。`
-  if (titleIndex >= 0) {
-    next[titleIndex] = titleLine
-  } else {
-    next.unshift(titleLine)
-  }
-
-  form.text = next.join('\n')
+  form.novel_alias = alias
   ElMessage.success(`已应用别名：${alias}`)
 }
 
@@ -779,6 +990,22 @@ async function uploadBgmFile(event) {
   }
 }
 
+async function uploadWatermarkFile(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const created = await api.uploadWatermark(file)
+    form.watermark_image_path = created.path || ''
+    form.watermark_type = 'image'
+    form.watermark_enabled = true
+    ElMessage.success('水印图片上传成功')
+  } catch (error) {
+    ElMessage.error(`水印图片上传失败：${error.message}`)
+  } finally {
+    event.target.value = ''
+  }
+}
+
 async function pickBgm(item) {
   try {
     await api.selectBgm(item.filename)
@@ -801,18 +1028,29 @@ async function deleteCurrentBgm() {
 }
 
 async function remixCurrentVideoBgm() {
-  if (!job.id) {
+  if (!activeJobId.value) {
     ElMessage.warning('请先生成至少一次视频')
     return
   }
   try {
     loading.generate = true
-    await api.remixBgm(job.id, {
+    await api.remixBgm(activeJobId.value, {
       bgm_enabled: form.bgm_enabled,
       bgm_volume: form.bgm_volume,
-      fps: form.fps
+      fps: form.fps,
+      novel_alias: form.novel_alias || null,
+      watermark_enabled: form.watermark_enabled,
+      watermark_type: form.watermark_type,
+      watermark_text: form.watermark_text || null,
+      watermark_image_path: form.watermark_image_path || null,
+      watermark_opacity: form.watermark_opacity
     })
-    job.videoUrl = `${api.getVideoUrl(job.id)}?t=${Date.now()}`
+    const nextUrl = `${api.getVideoUrl(activeJobId.value)}?t=${Date.now()}`
+    upsertJobRecord({ id: activeJobId.value, videoUrl: nextUrl, updatedAt: Date.now() })
+    if (job.id === activeJobId.value) {
+      job.videoUrl = nextUrl
+    }
+    persistJobSnapshot()
     ElMessage.success('已完成仅替换BGM（无需重跑全流程）')
   } catch (error) {
     ElMessage.error(`仅替换BGM失败：${error.message}`)
@@ -821,10 +1059,47 @@ async function remixCurrentVideoBgm() {
   }
 }
 
+async function recoverJobById() {
+  const id = String(recoverJobIdInput.value || '').trim()
+  if (!id) {
+    ElMessage.warning('请先输入任务ID')
+    return
+  }
+  try {
+    const status = await api.getJob(id)
+    syncActiveJobRecordFromApiStatus(id, status)
+    selectJob(id)
+    recoverJobIdInput.value = ''
+    persistJobSnapshot()
+    startPolling()
+    ElMessage.success(`已恢复任务：${id}`)
+  } catch (error) {
+    ElMessage.error(`恢复任务失败：${error.message}`)
+  }
+}
+
+function openJob(jobId) {
+  selectJob(jobId)
+  persistJobSnapshot()
+}
+
+function removeJob(jobId) {
+  removeJobRecord(jobId)
+  persistJobSnapshot()
+  if (!jobs.value.length) {
+    resetJob()
+    stopPolling()
+  }
+}
+
 onMounted(async () => {
+  restoreJobSnapshot()
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
   await loadBgmStatus()
+  if (jobs.value.length) {
+    startPolling()
+  }
 })
 
 onUnmounted(() => {
@@ -989,6 +1264,48 @@ onUnmounted(() => {
         <el-button @click="openBgmPicker">从BGM库选择</el-button>
         <el-button type="danger" plain @click="deleteCurrentBgm">删除当前BGM</el-button>
       </div>
+      <div class="switch-row">
+        <el-switch v-model="form.watermark_enabled" />
+        <span>启用水印</span>
+        <el-select v-model="form.watermark_type" style="width: 140px" :disabled="!form.watermark_enabled">
+          <el-option label="文字" value="text" />
+          <el-option label="图片" value="image" />
+        </el-select>
+        <el-input
+          v-model="form.watermark_text"
+          placeholder="水印文字"
+          clearable
+          style="max-width: 220px"
+          :disabled="!form.watermark_enabled || form.watermark_type !== 'text'"
+        />
+        <label class="upload-btn" :class="{ disabled: !form.watermark_enabled || form.watermark_type !== 'image' }">
+          <input
+            type="file"
+            accept="image/*"
+            @change="uploadWatermarkFile"
+            :disabled="!form.watermark_enabled || form.watermark_type !== 'image'"
+          />
+          上传水印图
+        </label>
+      </div>
+      <div class="grid">
+        <div>
+          <label>水印透明度</label>
+          <el-slider
+            v-model="form.watermark_opacity"
+            :min="0.05"
+            :max="1"
+            :step="0.01"
+            :disabled="!form.watermark_enabled"
+            show-input
+            :show-input-controls="false"
+            input-size="small"
+          />
+        </div>
+      </div>
+      <div class="muted bgm-status" v-if="form.watermark_image_path">
+        <span>水印图片：{{ form.watermark_image_path.split('/').pop() }}</span>
+      </div>
       <div class="muted bgm-status">
         <span v-if="bgmStatus.exists">
           当前BGM：{{ bgmStatus.filename }} ｜ {{ formatFileSize(bgmStatus.size) }}
@@ -1041,6 +1358,13 @@ onUnmounted(() => {
           >
             {{ item }}
           </el-tag>
+        </div>
+      </div>
+
+      <div class="replace-toolbar">
+        <div class="actions">
+          <el-input v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable style="max-width: 360px" />
+          <span class="muted">书名将作为最终合成顶栏叠加，不再写入正文</span>
         </div>
       </div>
 
@@ -1161,17 +1485,47 @@ onUnmounted(() => {
 
     <section class="card">
       <h2>{{ t('section.render') }}</h2>
+      <div class="job-restore-row">
+        <el-input v-model="recoverJobIdInput" placeholder="输入任务ID后恢复进度" clearable style="max-width: 360px" />
+        <el-button @click="recoverJobById">恢复任务</el-button>
+      </div>
+
+      <div v-if="sortedJobs.length" class="job-list">
+        <div
+          v-for="item in sortedJobs"
+          :key="item.id"
+          class="job-list-item"
+          :class="{ active: item.id === activeJobId }"
+        >
+          <div class="job-list-main" @click="openJob(item.id)">
+            <div class="job-list-id">{{ item.id }}</div>
+            <div class="job-list-meta">
+              <span>{{ item.status }}</span>
+              <span>·</span>
+              <span>{{ Math.round((Number(item.progress || 0) * 100)) }}%</span>
+              <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
+            </div>
+          </div>
+          <el-button size="small" type="danger" plain @click="removeJob(item.id)">移除</el-button>
+        </div>
+      </div>
+
       <div class="actions">
         <el-button type="primary" :loading="loading.generate" @click="runGenerate">{{ t('action.generateVideo') }}</el-button>
-        <el-button :loading="loading.generate" :disabled="!job.id" @click="remixCurrentVideoBgm">仅替换BGM（最后一步）</el-button>
-        <el-button :disabled="!job.id" type="danger" @click="cancelCurrentJob">{{ t('action.cancelJob') }}</el-button>
+        <el-button :loading="loading.generate" :disabled="!activeJobId" @click="remixCurrentVideoBgm">仅替换BGM（最后一步）</el-button>
+        <el-button :disabled="!activeJobId" type="danger" @click="cancelCurrentJob">{{ t('action.cancelJob') }}</el-button>
       </div>
 
       <div v-if="job.id" class="job">
         <p><strong>{{ t('hint.jobId') }}：</strong>{{ job.id }}</p>
         <p><strong>{{ t('hint.jobStatus') }}：</strong>{{ job.status }} / {{ job.step }}</p>
         <p><strong>{{ t('hint.jobMessage') }}：</strong>{{ job.message }}</p>
-        <el-progress :percentage="Math.round(job.progress * 100)" />
+        <p><strong>当前场景：</strong>{{ sceneProgressText }}</p>
+        <el-progress :percentage="sceneProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')">
+          <span>{{ sceneProgressPercent }}%</span>
+        </el-progress>
+        <p><strong>总体进度：</strong>{{ uiProgressPercent }}%</p>
+        <el-progress :percentage="uiProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')" />
       </div>
 
       <div v-if="job.clipPreviewUrls.length" class="clip-grid">

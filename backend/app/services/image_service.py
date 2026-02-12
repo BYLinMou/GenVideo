@@ -27,22 +27,50 @@ def _extract_first_url(text: str) -> str | None:
     return None
 
 
-def _build_messages(prompt: str, reference_image_path: str | None = None) -> list[dict]:
+def _build_messages(
+    prompt: str,
+    reference_image_path: str | None = None,
+    extra_reference_image_paths: list[str] | None = None,
+) -> list[dict]:
+    prompt_text = str(prompt or "").strip()
+    if not prompt_text:
+        prompt_text = "Generate one single image based on the current plot segment."
+
+    candidate_paths: list[str] = []
     if reference_image_path:
-        ref = Path(reference_image_path)
+        candidate_paths.append(str(reference_image_path))
+    for raw in (extra_reference_image_paths or []):
+        if raw:
+            candidate_paths.append(str(raw))
+
+    dedup_paths: list[str] = []
+    seen: set[str] = set()
+    for raw in candidate_paths:
+        key = str(raw).replace("\\", "/").lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        dedup_paths.append(raw)
+
+    image_parts: list[dict] = []
+    for raw in dedup_paths[:2]:
+        ref = Path(raw)
         if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
             mime = "image/png" if ref.suffix.lower() == ".png" else "image/jpeg"
             encoded = base64.b64encode(ref.read_bytes()).decode("utf-8")
-            return [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}},
-                    ],
-                }
-            ]
-    return [{"role": "user", "content": prompt}]
+            image_parts.append({"type": "image_url", "image_url": {"url": f"data:{mime};base64,{encoded}"}})
+
+    if image_parts:
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    *image_parts,
+                ],
+            }
+        ]
+    return [{"role": "user", "content": prompt_text}]
 
 
 async def generate_image(
@@ -50,6 +78,7 @@ async def generate_image(
     output_path: Path,
     resolution: tuple[int, int],
     reference_image_path: str | None = None,
+    extra_reference_image_paths: list[str] | None = None,
     aspect_ratio: str | None = None,
 ) -> Path:
     if not settings.image_api_key:
@@ -61,7 +90,11 @@ async def generate_image(
     }
     payload = {
         "model": settings.image_model,
-        "messages": _build_messages(prompt, reference_image_path=reference_image_path),
+        "messages": _build_messages(
+            prompt,
+            reference_image_path=reference_image_path,
+            extra_reference_image_paths=extra_reference_image_paths,
+        ),
         "stream": True,
     }
     if aspect_ratio:
@@ -125,7 +158,11 @@ async def generate_image(
         )
         retry_payload = {
             "model": settings.image_model,
-            "messages": _build_messages(retry_prompt, reference_image_path=reference_image_path),
+            "messages": _build_messages(
+                retry_prompt,
+                reference_image_path=reference_image_path,
+                extra_reference_image_paths=extra_reference_image_paths,
+            ),
             "stream": True,
         }
         if aspect_ratio:
@@ -142,6 +179,7 @@ async def use_reference_or_generate(
     output_path: Path,
     resolution: tuple[int, int],
     reference_image_path: str | None,
+    extra_reference_image_paths: list[str] | None = None,
     aspect_ratio: str | None = None,
 ) -> Path:
     return await generate_image(
@@ -149,6 +187,7 @@ async def use_reference_or_generate(
         output_path=output_path,
         resolution=resolution,
         reference_image_path=reference_image_path,
+        extra_reference_image_paths=extra_reference_image_paths,
         aspect_ratio=aspect_ratio,
     )
 

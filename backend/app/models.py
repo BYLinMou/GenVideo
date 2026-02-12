@@ -102,6 +102,12 @@ class GenerateVideoRequest(BaseModel):
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
+    novel_alias: str | None = None
+    watermark_enabled: bool = False
+    watermark_type: Literal["text", "image"] = "text"
+    watermark_text: str | None = None
+    watermark_image_path: str | None = None
+    watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
     model_id: str | None = None
     enable_scene_image_reuse: bool = True
     scene_reuse_no_repeat_window: int = Field(default=3, ge=0, le=100)
@@ -117,6 +123,12 @@ class RemixBgmRequest(BaseModel):
     bgm_enabled: bool = True
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
+    novel_alias: str | None = None
+    watermark_enabled: bool = False
+    watermark_type: Literal["text", "image"] = "text"
+    watermark_text: str | None = None
+    watermark_image_path: str | None = None
+    watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
 
 
 class RemixBgmResponse(BaseModel):
@@ -131,6 +143,8 @@ class JobStatus(BaseModel):
     progress: float = 0.0
     step: str = ""
     message: str = ""
+    current_segment: int = 0
+    total_segments: int = 0
     output_video_url: str | None = None
     output_video_path: str | None = None
     clip_count: int = 0

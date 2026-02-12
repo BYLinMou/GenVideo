@@ -91,6 +91,7 @@ Important paths:
 - `CHARACTER_REF_DIR`: reusable character reference image library
 - `SCENE_CACHE_DIR`: generated scene-image cache files
 - `SCENE_CACHE_INDEX_PATH`: metadata index for scene-image reuse
+- `SCENE_CACHE_DB_PATH`: sqlite storage for scene cache (reference-image bindings)
 - `LOG_DIR`: backend log files
 
 Request field (generate video):

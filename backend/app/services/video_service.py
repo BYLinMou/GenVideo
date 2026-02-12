@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import re
 import shutil
@@ -48,10 +49,321 @@ _VIDEO_AUDIO_BITRATE = "96k"
 _TTS_GAIN = 1.15
 _FINAL_AUDIO_GAIN = 3.0
 _NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
+_OVERLAY_FONT_SIZE = 58
 _DIALOG_QUOTE_PAIRS = {
     '"': '"',
     "\u201c": "\u201d",  # “ ”
 }
+
+
+def _ffmpeg_escape_text(text: str) -> str:
+    value = (text or "").replace("\\", "\\\\")
+    value = value.replace(":", "\\:").replace("'", "\\'")
+    value = value.replace("\n", " ").replace("\r", " ")
+    value = value.replace("%", "\\%")
+    return value
+
+
+def _probe_video_size(path: Path) -> tuple[int, int]:
+    ffprobe_bin = shutil.which("ffprobe")
+    if ffprobe_bin:
+        cmd = [
+            ffprobe_bin,
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height",
+            "-of",
+            "json",
+            str(path),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode == 0:
+            try:
+                parsed = json.loads(proc.stdout or "{}")
+                streams = parsed.get("streams") or []
+                if streams:
+                    width = int(streams[0].get("width") or 0)
+                    height = int(streams[0].get("height") or 0)
+                    if width > 0 and height > 0:
+                        return width, height
+            except Exception:
+                logger.exception("Failed to parse ffprobe output for video size")
+
+    try:
+        from moviepy import VideoFileClip
+
+        clip = VideoFileClip(str(path))
+        try:
+            return int(clip.w), int(clip.h)
+        finally:
+            clip.close()
+    except Exception:
+        logger.exception("Failed to probe output size, fallback to 1920x1080")
+    return 1920, 1080
+
+
+def _compose_overlay_filter(
+    width: int,
+    height: int,
+    subtitle_font: str | None,
+    novel_alias: str | None,
+    watermark_enabled: bool,
+    watermark_type: str,
+    watermark_text: str | None,
+    watermark_opacity: float,
+) -> tuple[str, bool]:
+    filters: list[str] = []
+    has_image_input = False
+    current_video = "0:v"
+
+    alias_value = (novel_alias or "").strip()
+    if alias_value:
+        alias_font_size = max(54, int(_OVERLAY_FONT_SIZE))
+        alias_line_h = int(alias_font_size * 1.5)
+        alias_font = _ffmpeg_escape_text(str(subtitle_font or "C:/Windows/Fonts/msyh.ttc"))
+        alias_text = _ffmpeg_escape_text(alias_value)
+        filters.append(
+            f"[{current_video}]drawbox=x=0:y=0:w={width}:h={alias_line_h}:color=black@0.35:t=fill[vbox0]"
+        )
+        filters.append(
+            "[vbox0]drawtext="
+            f"fontfile='{alias_font}':"
+            f"text='{alias_text}':"
+            f"fontcolor=white:fontsize={alias_font_size}:"
+            f"x=(w-text_w)/2:y=max(12\\,({alias_line_h}-text_h)/2)[vtitle0]"
+        )
+        current_video = "vtitle0"
+
+    if watermark_enabled:
+        opacity = max(0.05, min(float(watermark_opacity), 1.0))
+        wm_w = max(140, int(width * 0.22))
+        wm_h = max(60, int(height * 0.12))
+        travel_time = 18
+        if watermark_type == "image":
+            has_image_input = True
+            filters.append(
+                "[1:v]"
+                f"scale=w={wm_w}:h=-1,"
+                f"format=rgba,colorchannelmixer=aa={opacity}[wmimg0]"
+            )
+            filters.append(
+                f"[{current_video}][wmimg0]overlay="
+                f"x='if(lt(mod(t\\,{travel_time})\\,{travel_time/2})\\,20+(W-w-40)*mod(t\\,{travel_time/2})/{travel_time/2}\\,W-w-20-(W-w-40)*mod(t-{travel_time/2}\\,{travel_time/2})/{travel_time/2})':"
+                f"y='if(lt(mod(t\\,{travel_time})\\,{travel_time/2})\\,20+(H-h-40)*mod(t\\,{travel_time/2})/{travel_time/2}\\,H-h-20-(H-h-40)*mod(t-{travel_time/2}\\,{travel_time/2})/{travel_time/2})':"
+                "shortest=1[vwm0]"
+            )
+        else:
+            wm_text = _ffmpeg_escape_text((watermark_text or "").strip() or "WATERMARK")
+            wm_font = _ffmpeg_escape_text(str(subtitle_font or "C:/Windows/Fonts/msyh.ttc"))
+            wm_size = max(48, int(_OVERLAY_FONT_SIZE * 1.1))
+            filters.append(
+                f"[{current_video}]drawtext="
+                f"fontfile='{wm_font}':"
+                f"text='{wm_text}':"
+                f"fontcolor=white@{opacity}:fontsize={wm_size}:"
+                f"x='if(lt(mod(t\\,{travel_time})\\,{travel_time/2})\\,20+(w-text_w-40)*mod(t\\,{travel_time/2})/{travel_time/2}\\,w-text_w-20-(w-text_w-40)*mod(t-{travel_time/2}\\,{travel_time/2})/{travel_time/2})':"
+                f"y='if(lt(mod(t\\,{travel_time})\\,{travel_time/2})\\,20+(h-text_h-40)*mod(t\\,{travel_time/2})/{travel_time/2}\\,h-text_h-20-(h-text_h-40)*mod(t-{travel_time/2}\\,{travel_time/2})/{travel_time/2})'[vwm0]"
+            )
+        current_video = "vwm0"
+
+    if current_video != "0:v":
+        filters.append(f"[{current_video}]format=yuv420p[vout]")
+
+    return ";".join(filters), has_image_input
+
+
+def _apply_final_overlays_ffmpeg(
+    ffmpeg_bin: str,
+    input_video: Path,
+    output_video: Path,
+    novel_alias: str | None,
+    watermark_enabled: bool,
+    watermark_type: str,
+    watermark_text: str | None,
+    watermark_image_path: str | None,
+    watermark_opacity: float,
+    preset: str,
+    crf: str,
+) -> Path:
+    overlay_needed = bool((novel_alias or "").strip()) or bool(watermark_enabled)
+    if not overlay_needed:
+        return input_video
+
+    width, height = _probe_video_size(input_video)
+    subtitle_font = _subtitle_font_path()
+    filter_complex, has_image_input = _compose_overlay_filter(
+        width=width,
+        height=height,
+        subtitle_font=subtitle_font,
+        novel_alias=novel_alias,
+        watermark_enabled=bool(watermark_enabled),
+        watermark_type=(watermark_type or "text").strip().lower(),
+        watermark_text=watermark_text,
+        watermark_opacity=watermark_opacity,
+    )
+    if not filter_complex:
+        return input_video
+
+    cmd = [
+        ffmpeg_bin,
+        "-y",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-i",
+        str(input_video),
+    ]
+
+    if has_image_input:
+        wm_path = Path(watermark_image_path or "")
+        if wm_path.exists() and wm_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            cmd.extend(["-stream_loop", "-1", "-i", str(wm_path)])
+        else:
+            fallback_filter, _ = _compose_overlay_filter(
+                width=width,
+                height=height,
+                subtitle_font=subtitle_font,
+                novel_alias=novel_alias,
+                watermark_enabled=bool(watermark_enabled),
+                watermark_type="text",
+                watermark_text=watermark_text,
+                watermark_opacity=watermark_opacity,
+            )
+            filter_complex = fallback_filter
+
+    cmd.extend(
+        [
+            "-filter_complex",
+            filter_complex,
+            "-map",
+            "[vout]",
+            "-map",
+            "0:a:0",
+            "-c:v",
+            "libx264",
+            "-preset",
+            preset,
+            "-crf",
+            crf,
+            "-c:a",
+            "copy",
+            "-movflags",
+            "+faststart",
+            str(output_video),
+        ]
+    )
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    if proc.returncode == 0 and output_video.exists():
+        return output_video
+    logger.warning("ffmpeg final overlay failed, skip overlay: %s", (proc.stderr or "")[:400])
+    return input_video
+
+
+def _build_moviepy_overlay_clips(
+    final_output,
+    novel_alias: str | None,
+    watermark_enabled: bool,
+    watermark_type: str,
+    watermark_text: str | None,
+    watermark_image_path: str | None,
+    watermark_opacity: float,
+) -> list:
+    clips: list = []
+    duration = max(0.1, float(final_output.duration or 0.1))
+    width = int(final_output.w)
+    height = int(final_output.h)
+    overlay_font = _subtitle_font_path()
+
+    alias_value = (novel_alias or "").strip()
+    if alias_value:
+        title_clip = TextClip(
+            text=alias_value,
+            font=overlay_font if overlay_font else None,
+            font_size=max(54, int(_OVERLAY_FONT_SIZE)),
+            color="#FFFFFF",
+            stroke_color="#111111",
+            stroke_width=2,
+            method="caption",
+            size=(max(320, width - 120), 120),
+            text_align="center",
+            horizontal_align="center",
+            vertical_align="center",
+        ).with_position(("center", 10)).with_duration(duration)
+        clips.append(title_clip)
+
+    if not watermark_enabled:
+        return clips
+
+    opacity = max(0.05, min(float(watermark_opacity), 1.0))
+    travel = 18.0
+
+    if (watermark_type or "text").strip().lower() == "image":
+        wm_path = Path(watermark_image_path or "")
+        if wm_path.exists() and wm_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
+            wm = ImageClip(str(wm_path)).with_duration(duration)
+            wm = wm.resized(width=max(140, int(width * 0.22))).with_opacity(opacity)
+
+            def wm_pos(t: float) -> tuple[float, float]:
+                safe_t = float(t or 0.0)
+                phase = (safe_t % travel) / travel
+                if phase < 0.25:
+                    ratio = phase / 0.25
+                    x = 20 + (width - wm.w - 40) * ratio
+                    y = 20
+                elif phase < 0.5:
+                    ratio = (phase - 0.25) / 0.25
+                    x = width - wm.w - 20
+                    y = 20 + (height - wm.h - 40) * ratio
+                elif phase < 0.75:
+                    ratio = (phase - 0.5) / 0.25
+                    x = width - wm.w - 20 - (width - wm.w - 40) * ratio
+                    y = height - wm.h - 20
+                else:
+                    ratio = (phase - 0.75) / 0.25
+                    x = 20
+                    y = height - wm.h - 20 - (height - wm.h - 40) * ratio
+                return max(20.0, x), max(20.0, y)
+
+            clips.append(wm.with_position(wm_pos))
+            return clips
+
+    wm_text = (watermark_text or "").strip() or "WATERMARK"
+    wm_text_clip = TextClip(
+        text=wm_text,
+        font=overlay_font if overlay_font else None,
+        font_size=max(48, int(_OVERLAY_FONT_SIZE * 1.1)),
+        color="#FFFFFF",
+        stroke_color="#111111",
+        stroke_width=2,
+        method="label",
+    ).with_duration(duration).with_opacity(opacity)
+
+    def wm_text_pos(t: float) -> tuple[float, float]:
+        safe_t = float(t or 0.0)
+        phase = (safe_t % travel) / travel
+        if phase < 0.25:
+            ratio = phase / 0.25
+            x = 20 + (width - wm_text_clip.w - 40) * ratio
+            y = 20
+        elif phase < 0.5:
+            ratio = (phase - 0.25) / 0.25
+            x = width - wm_text_clip.w - 20
+            y = 20 + (height - wm_text_clip.h - 40) * ratio
+        elif phase < 0.75:
+            ratio = (phase - 0.5) / 0.25
+            x = width - wm_text_clip.w - 20 - (width - wm_text_clip.w - 40) * ratio
+            y = height - wm_text_clip.h - 20
+        else:
+            ratio = (phase - 0.75) / 0.25
+            x = 20
+            y = height - wm_text_clip.h - 20 - (height - wm_text_clip.h - 40) * ratio
+        return max(20.0, x), max(20.0, y)
+
+    clips.append(wm_text_clip.with_position(wm_text_pos))
+    return clips
 
 
 def _resolve_render_profile(mode: str | None) -> dict:
@@ -95,10 +407,63 @@ def _parse_resolution(value: str) -> tuple[int, int]:
 def _pick_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion:
     if not characters:
         return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
+    content = text or ""
+    hits: list[tuple[int, int, CharacterSuggestion]] = []
     for item in characters:
-        if item.name and item.name in text:
-            return item
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        pos = content.find(name)
+        if pos >= 0:
+            hits.append((pos, -int(item.importance or 0), item))
+    if hits:
+        hits.sort(key=lambda item: (item[0], item[1]))
+        return hits[0][2]
     return characters[0]
+
+
+def _pick_related_characters(characters: list[CharacterSuggestion], text: str, primary: CharacterSuggestion) -> list[CharacterSuggestion]:
+    if not characters:
+        return []
+    normalized = (text or "").strip()
+    selected: list[CharacterSuggestion] = []
+
+    for item in characters:
+        if item.name and item.name in normalized:
+            selected.append(item)
+
+    if primary not in selected:
+        selected.insert(0, primary)
+
+    dedup: list[CharacterSuggestion] = []
+    seen: set[int] = set()
+    for item in selected:
+        marker = id(item)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        dedup.append(item)
+    return dedup
+
+
+def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 2) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for item in characters:
+        raw = (item.reference_image_path or "").strip()
+        if not raw:
+            continue
+        key = raw.replace("\\", "/").lower()
+        if key in seen:
+            continue
+        path = Path(raw)
+        if not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        seen.add(key)
+        output.append(raw)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
 
 
 def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_voice: str = _NARRATOR_VOICE_ID) -> list[CharacterSuggestion]:
@@ -608,6 +973,12 @@ def _render_final_sync(
     bgm_enabled: bool,
     bgm_volume: float,
     render_mode: str,
+    novel_alias: str | None = None,
+    watermark_enabled: bool = False,
+    watermark_type: str = "text",
+    watermark_text: str | None = None,
+    watermark_image_path: str | None = None,
+    watermark_opacity: float = 0.6,
 ) -> None:
     profile = _resolve_render_profile(render_mode)
     final_preset = str(profile.get("final_preset") or "veryfast")
@@ -649,6 +1020,20 @@ def _render_final_sync(
                 if not bgm_path.exists():
                     bgm_path = project_path("assets/bgm/happinessinmusic-rock-trailer-417598.mp3")
 
+                merged_input = _apply_final_overlays_ffmpeg(
+                    ffmpeg_bin=ffmpeg_bin,
+                    input_video=merged_no_bgm,
+                    output_video=Path(tmp_dir) / "merged_with_overlay.mp4",
+                    novel_alias=novel_alias,
+                    watermark_enabled=watermark_enabled,
+                    watermark_type=watermark_type,
+                    watermark_text=watermark_text,
+                    watermark_image_path=watermark_image_path,
+                    watermark_opacity=watermark_opacity,
+                    preset=final_preset,
+                    crf=final_crf,
+                )
+
                 if bgm_enabled and bgm_volume > 0 and bgm_path.exists():
                     if bool(profile.get("bgm_video_copy", True)):
                         mix_cmd = [
@@ -658,7 +1043,7 @@ def _render_final_sync(
                             "-loglevel",
                             "error",
                             "-i",
-                            str(merged_no_bgm),
+                            str(merged_input),
                             "-stream_loop",
                             "-1",
                             "-i",
@@ -687,7 +1072,7 @@ def _render_final_sync(
                             "-loglevel",
                             "error",
                             "-i",
-                            str(merged_no_bgm),
+                            str(merged_input),
                             "-stream_loop",
                             "-1",
                             "-i",
@@ -725,7 +1110,7 @@ def _render_final_sync(
                         "-loglevel",
                         "error",
                         "-i",
-                        str(merged_no_bgm),
+                        str(merged_input),
                         "-map",
                         "0:v:0",
                         "-map",
@@ -747,7 +1132,7 @@ def _render_final_sync(
                         logger.info("Final compose via ffmpeg concat + final gain")
                         return
                     logger.warning("ffmpeg final gain failed, fallback to concat copy: %s", (boost_proc.stderr or "")[:400])
-                    shutil.copyfile(merged_no_bgm, output_path)
+                    shutil.copyfile(merged_input, output_path)
                     logger.info("Final compose via ffmpeg concat copy")
                     return
             else:
@@ -755,8 +1140,10 @@ def _render_final_sync(
 
     video_clips = []
     bgm_clips = []
+    overlay_clips = []
     final = None
     final_with_audio = None
+    with_overlay = None
     try:
         from moviepy import VideoFileClip
 
@@ -792,9 +1179,26 @@ def _render_final_sync(
                 logger.warning("BGM file does not exist, skip mixing: %s", bgm_path)
 
         final_output = final_with_audio or final
-        boosted_output = final_output
-        if final_output.audio is not None:
-            boosted_output = final_output.with_audio(final_output.audio.with_volume_scaled(_FINAL_AUDIO_GAIN))
+        overlay_clips = _build_moviepy_overlay_clips(
+            final_output=final_output,
+            novel_alias=novel_alias,
+            watermark_enabled=watermark_enabled,
+            watermark_type=watermark_type,
+            watermark_text=watermark_text,
+            watermark_image_path=watermark_image_path,
+            watermark_opacity=watermark_opacity,
+        )
+        with_overlay = (
+            CompositeVideoClip([final_output, *overlay_clips], size=(int(final_output.w), int(final_output.h))).with_duration(
+                max(0.1, float(final_output.duration or 0.1))
+            )
+            if overlay_clips
+            else final_output
+        )
+
+        boosted_output = with_overlay
+        if with_overlay.audio is not None:
+            boosted_output = with_overlay.with_audio(with_overlay.audio.with_volume_scaled(_FINAL_AUDIO_GAIN))
 
         boosted_output.write_videofile(
             str(output_path),
@@ -806,8 +1210,12 @@ def _render_final_sync(
             logger=None,
         )
 
-        if boosted_output is not final_output:
+        if boosted_output is not with_overlay:
             boosted_output.close()
+        if with_overlay is not None and with_overlay is not final_output:
+            with_overlay.close()
+        for clip in overlay_clips:
+            clip.close()
     finally:
         if final_with_audio is not None:
             final_with_audio.close()
@@ -840,6 +1248,8 @@ def _update_job(
     progress: float,
     step: str,
     message: str,
+    current_segment: int = 0,
+    total_segments: int = 0,
     output_video_path: str | None = None,
     clip_paths: list[str] | None = None,
 ) -> None:
@@ -853,6 +1263,8 @@ def _update_job(
             progress=progress,
             step=step,
             message=message,
+            current_segment=max(0, int(current_segment or 0)),
+            total_segments=max(0, int(total_segments or 0)),
             output_video_url=f"{base_url}/api/jobs/{job_id}/video" if output_video_path else None,
             output_video_path=output_video_path,
             clip_count=len(clip_paths or []),
@@ -864,6 +1276,7 @@ def _update_job(
 async def _resolve_segment_image(
     payload: GenerateVideoRequest,
     character: CharacterSuggestion,
+    related_reference_image_paths: list[str],
     segment_text: str,
     prompt: str,
     scene_metadata: dict,
@@ -876,6 +1289,7 @@ async def _resolve_segment_image(
         segment_text=segment_text,
         prompt=prompt,
         metadata=scene_metadata,
+        related_reference_image_paths=related_reference_image_paths,
     )
 
     if payload.enable_scene_image_reuse:
@@ -905,6 +1319,7 @@ async def _resolve_segment_image(
             output_path=image_path,
             resolution=resolution,
             reference_image_path=character.reference_image_path,
+            extra_reference_image_paths=related_reference_image_paths,
             aspect_ratio=payload.image_aspect_ratio,
         )
     except ImageGenerationError as generation_error:
@@ -993,7 +1408,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         ensure_scene_cache_paths()
 
     try:
-        _update_job(job_id, base_url, "running", 0.05, "segment", "Segmenting text")
+        _update_job(job_id, base_url, "running", 0.05, "segment", "Segmenting text", current_segment=0, total_segments=0)
         segments, sentence_count = await _segment_text(payload)
         if payload.max_segment_groups > 0:
             segments = segments[: payload.max_segment_groups]
@@ -1010,21 +1425,38 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         for index, segment_text in enumerate(segments):
             if job_store.is_cancelled(job_id):
-                _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "Job cancelled", clip_paths=clip_paths)
+                _update_job(
+                    job_id,
+                    base_url,
+                    "cancelled",
+                    1.0,
+                    "cancelled",
+                    "Job cancelled",
+                    current_segment=index,
+                    total_segments=total,
+                    clip_paths=clip_paths,
+                )
                 return
 
-            progress = 0.1 + (index / total) * 0.75
+            stage_start = 0.1
+            stage_span = 0.75
+            segment_progress = index / max(total, 1)
+            progress = stage_start + segment_progress * stage_span
             _update_job(
                 job_id,
                 base_url,
                 "running",
                 progress,
                 "render-segment",
-                f"Rendering segment {index + 1}/{total} (sentences: {sentence_count or '-'})",
+                f"Rendering scene {index + 1}/{total} (sentences: {sentence_count or '-'})",
+                current_segment=index + 1,
+                total_segments=total,
                 clip_paths=clip_paths,
             )
 
             character = _pick_character(characters, segment_text)
+            related_characters = _pick_related_characters(characters, segment_text, character)
+            related_reference_paths = _collect_reference_paths(related_characters, limit=2)
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
@@ -1035,6 +1467,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     character=character,
                     segment_text=segment_text,
                     model_id=payload.model_id,
+                    related_reference_image_paths=related_reference_paths,
                 )
             )
             audio_task = asyncio.create_task(
@@ -1054,6 +1487,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 _resolve_segment_image(
                     payload=payload,
                     character=character,
+                    related_reference_image_paths=related_reference_paths,
                     segment_text=segment_text,
                     prompt=prompt,
                     scene_metadata=scene_metadata,
@@ -1086,12 +1520,44 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 payload.render_mode,
             )
             clip_paths.append(str(clip_path))
+            completed_ratio = (index + 1) / max(total, 1)
+            _update_job(
+                job_id,
+                base_url,
+                "running",
+                stage_start + completed_ratio * stage_span,
+                "render-segment",
+                f"Scene {index + 1}/{total} rendered",
+                current_segment=index + 1,
+                total_segments=total,
+                clip_paths=clip_paths,
+            )
 
         if job_store.is_cancelled(job_id):
-            _update_job(job_id, base_url, "cancelled", 1.0, "cancelled", "Job cancelled", clip_paths=clip_paths)
+            _update_job(
+                job_id,
+                base_url,
+                "cancelled",
+                1.0,
+                "cancelled",
+                "Job cancelled",
+                current_segment=total,
+                total_segments=total,
+                clip_paths=clip_paths,
+            )
             return
 
-        _update_job(job_id, base_url, "running", 0.9, "compose", "Composing final video", clip_paths=clip_paths)
+        _update_job(
+            job_id,
+            base_url,
+            "running",
+            0.9,
+            "compose",
+            f"Composing final video ({total}/{total} scenes ready)",
+            current_segment=total,
+            total_segments=total,
+            clip_paths=clip_paths,
+        )
         output_root = project_path(settings.output_dir)
         output_root.mkdir(parents=True, exist_ok=True)
         final_path = output_root / f"{job_id}.mp4"
@@ -1103,6 +1569,12 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             payload.bgm_enabled,
             payload.bgm_volume,
             payload.render_mode,
+            payload.novel_alias,
+            payload.watermark_enabled,
+            payload.watermark_type,
+            payload.watermark_text,
+            payload.watermark_image_path,
+            payload.watermark_opacity,
         )
 
         if job_store.is_cancelled(job_id):
@@ -1113,6 +1585,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 1.0,
                 "cancelled",
                 "Job cancelled during compose stage",
+                current_segment=total,
+                total_segments=total,
                 clip_paths=clip_paths,
             )
             return
@@ -1124,6 +1598,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             1.0,
             "done",
             "Video generation completed",
+            current_segment=total,
+            total_segments=total,
             output_video_path=str(final_path),
             clip_paths=clip_paths,
         )
@@ -1158,6 +1634,8 @@ def cancel_job(job_id: str, base_url: str) -> bool:
                 progress=current.progress,
                 step="cancelled",
                 message="Cancel request accepted, stopping",
+                current_segment=current.current_segment,
+                total_segments=current.total_segments,
                 output_video_url=current.output_video_url,
                 output_video_path=current.output_video_path,
                 clip_count=current.clip_count,

@@ -72,6 +72,7 @@ app.add_middleware(
 project_path(settings.output_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.temp_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.character_ref_dir).mkdir(parents=True, exist_ok=True)
+project_path(settings.watermark_asset_dir).mkdir(parents=True, exist_ok=True)
 project_path("assets/bgm").mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_index_path).parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +83,11 @@ app.mount(
     "/assets/character_refs",
     StaticFiles(directory=project_path(settings.character_ref_dir)),
     name="character_refs",
+)
+app.mount(
+    "/assets/watermark",
+    StaticFiles(directory=project_path(settings.watermark_asset_dir)),
+    name="watermark_assets",
 )
 app.mount(
     "/assets/bgm",
@@ -282,6 +288,28 @@ async def upload_bgm(file: UploadFile = File(...)) -> BgmUploadResponse:
     )
 
 
+@app.post("/api/watermark/upload")
+async def upload_watermark(file: UploadFile = File(...)) -> dict:
+    suffix = Path(file.filename or "watermark.png").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+        raise HTTPException(status_code=400, detail="unsupported watermark format")
+
+    data = await file.read()
+    if not data:
+        raise HTTPException(status_code=400, detail="empty watermark file")
+
+    root = project_path(settings.watermark_asset_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    stem = Path(file.filename or "watermark").stem.replace(" ", "_") or "watermark"
+    output = root / f"{stem}_{uuid4().hex[:8]}{suffix}"
+    output.write_bytes(data)
+    return {
+        "path": output.as_posix(),
+        "filename": output.name,
+        "size": len(data),
+    }
+
+
 @app.get("/api/bgm/library")
 async def list_bgm_library(request: Request) -> dict:
     base_url = str(request.base_url).rstrip("/")
@@ -387,6 +415,12 @@ async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> 
         payload.bgm_enabled,
         payload.bgm_volume,
         "fast",
+        payload.novel_alias,
+        payload.watermark_enabled,
+        payload.watermark_type,
+        payload.watermark_text,
+        payload.watermark_image_path,
+        payload.watermark_opacity,
     )
 
     base_url = str(request.base_url).rstrip("/")

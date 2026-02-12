@@ -454,6 +454,7 @@ def _character_identity_guard(character: CharacterSuggestion) -> str:
 
     return (
         "Character consistency is mandatory across frames. "
+        "But if current segment is better represented as environment-only/scene-only, character does not need to appear in frame. "
         f"{reference_clause}"
         "Never change core identity (age/gender/face/hair/outfit signature). "
         f"Character appearance anchors: {anchors}."
@@ -469,6 +470,7 @@ def _fallback_segment_image_prompt(character: CharacterSuggestion, segment_text:
         f"{guard} "
         "Build one single image frame according to this current plot segment: "
         f"{scene_text}. "
+        "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
         "Background and action must come from the current plot segment. "
         "anime-style cinematic illustration, detailed lighting, clean composition, no text, no watermark"
     )
@@ -486,6 +488,7 @@ async def build_segment_image_bundle(
     character: CharacterSuggestion,
     segment_text: str,
     model_id: str | None,
+    related_reference_image_paths: list[str] | None = None,
 ) -> dict:
     fallback_bundle = _fallback_segment_image_bundle(character, segment_text)
     fallback_prompt = fallback_bundle["prompt"]
@@ -499,7 +502,9 @@ async def build_segment_image_bundle(
         "task": "build_image_prompt_for_story_segment",
         "rules": [
             "Keep character identity highly consistent across scenes.",
+            "Character appearance is optional per frame: LLM may output pure scene/environment frame when segment focus is on place/atmosphere/system message.",
             "Reference image (if present) is for character look only, never for scene/background.",
+            "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
             "Scene/background/action must be inferred from current segment text.",
             "Output one concise production-ready prompt in English.",
             "Also output strict scene metadata for cache-reuse matching.",
@@ -514,6 +519,7 @@ async def build_segment_image_bundle(
             "personality": _clean_text(character.personality, 400),
             "base_prompt": _clean_text(character.base_prompt, 800),
             "has_reference_image": bool(character.reference_image_path),
+            "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:2],
         },
         "current_segment": _clean_text(segment_text, 1800),
         "output_schema": {
@@ -552,6 +558,7 @@ async def build_segment_image_bundle(
                 final_prompt = (
                     f"{guard} "
                     f"Current plot segment: {scene_text}. "
+                    "If character is not necessary for this segment, you may generate scene-only frame. "
                     "Scene/background/action must follow current plot segment. "
                     f"Additional style and composition details: {candidate}"
                 )

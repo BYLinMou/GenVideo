@@ -106,6 +106,14 @@ export const api = {
       body: form
     })
   },
+  async uploadWatermark(file) {
+    const form = new FormData()
+    form.append('file', file)
+    return request('/api/watermark/upload', {
+      method: 'POST',
+      body: form
+    })
+  },
   generateCharacterRefImage(payload) {
     return jsonRequest('/api/character-reference-images/generate', 'POST', payload)
   },

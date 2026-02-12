@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     output_dir: str = Field(default="outputs", alias="OUTPUT_DIR")
     temp_dir: str = Field(default="outputs/temp", alias="TEMP_DIR")
     character_ref_dir: str = Field(default="assets/character_refs", alias="CHARACTER_REF_DIR")
+    watermark_asset_dir: str = Field(default="assets/watermark", alias="WATERMARK_ASSET_DIR")
     scene_cache_dir: str = Field(default="assets/scene_cache/images", alias="SCENE_CACHE_DIR")
     scene_cache_index_path: str = Field(default="assets/scene_cache/index.json", alias="SCENE_CACHE_INDEX_PATH")
     scene_cache_db_path: str = Field(default="assets/scene_cache/scene_cache.db", alias="SCENE_CACHE_DB_PATH")
