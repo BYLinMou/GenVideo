@@ -1255,7 +1255,7 @@ def _update_job(
 ) -> None:
     previews: list[str] = []
     if clip_paths:
-        previews = [f"{base_url}/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
+        previews = [f"/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1265,7 +1265,7 @@ def _update_job(
             message=message,
             current_segment=max(0, int(current_segment or 0)),
             total_segments=max(0, int(total_segments or 0)),
-            output_video_url=f"{base_url}/api/jobs/{job_id}/video" if output_video_path else None,
+            output_video_url=f"/api/jobs/{job_id}/video" if output_video_path else None,
             output_video_path=output_video_path,
             clip_count=len(clip_paths or []),
             clip_preview_urls=previews,

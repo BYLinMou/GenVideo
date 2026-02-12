@@ -423,7 +423,7 @@ async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> 
     return RemixBgmResponse(
         job_id=job_id,
         status="completed",
-        output_video_url=f"{base_url}/api/jobs/{job_id}/video",
+        output_video_url=f"/api/jobs/{job_id}/video",
     )
 
 

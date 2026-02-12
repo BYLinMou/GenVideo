@@ -476,6 +476,12 @@ function removeJobRecord(jobId) {
   jobs.value = jobs.value.filter((item) => item.id !== id)
   if (activeJobId.value === id) {
     activeJobId.value = jobs.value[0]?.id || ''
+    const next = jobs.value.find((item) => item.id === activeJobId.value)
+    if (next) {
+      syncJobViewFromRecord(next)
+    } else {
+      resetJob()
+    }
   }
 }
 
@@ -491,8 +497,27 @@ function syncJobViewFromRecord(record) {
   job.message = record.message || ''
   job.currentSegment = Number(record.currentSegment || 0)
   job.totalSegments = Number(record.totalSegments || 0)
-  job.videoUrl = record.videoUrl || ''
-  job.clipPreviewUrls = record.clipPreviewUrls || []
+  job.videoUrl = normalizeRuntimeUrl(record.videoUrl || '')
+  job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
+}
+
+function normalizeRuntimeUrl(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  if (value.startsWith('/')) {
+    return `${window.location.origin}${value}`
+  }
+  try {
+    const parsed = new URL(value)
+    if (window.location.hostname && parsed.hostname !== window.location.hostname) {
+      if (parsed.pathname.startsWith('/api/') || parsed.pathname.startsWith('/assets/')) {
+        return `${window.location.origin}${parsed.pathname}${parsed.search || ''}`
+      }
+    }
+    return value
+  } catch {
+    return value
+  }
 }
 
 function selectJob(jobId) {
@@ -516,8 +541,8 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     progress: Number(status.progress || 0),
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
-    clipPreviewUrls: status.clip_preview_urls || [],
-    videoUrl: status.status === 'completed' ? api.getVideoUrl(id) : '',
+    clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
+    videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
     updatedAt: Date.now()
   }
   upsertJobRecord(next)
@@ -780,9 +805,10 @@ async function pollJobsOnce() {
           if (!updated) return
 
           if (status.status === 'completed') {
-            upsertJobRecord({ id, videoUrl: api.getVideoUrl(id), updatedAt: Date.now() })
+            const completedUrl = normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id))
+            upsertJobRecord({ id, videoUrl: completedUrl, updatedAt: Date.now() })
             if (activeJobId.value === id) {
-              job.videoUrl = api.getVideoUrl(id)
+              job.videoUrl = completedUrl
             }
           }
         } catch (error) {
@@ -1102,12 +1128,33 @@ function openJob(jobId) {
   persistJobSnapshot()
 }
 
-function removeJob(jobId) {
-  removeJobRecord(jobId)
+async function removeJob(jobId) {
+  const id = String(jobId || '')
+  if (!id) return
+
+  const target = jobs.value.find((item) => item.id === id)
+  const needCancel = target ? ['queued', 'running'].includes(target.status) : false
+
+  if (needCancel) {
+    try {
+      await api.cancelJob(id)
+    } catch (error) {
+      const message = String(error?.message || '')
+      if (!message.includes('404')) {
+        ElMessage.error(t('toast.cancelFailed', { error: error.message }))
+        return
+      }
+    }
+  }
+
+  removeJobRecord(id)
   persistJobSnapshot()
   if (!jobs.value.length) {
-    resetJob()
     stopPolling()
+  }
+
+  if (needCancel) {
+    ElMessage.success(t('toast.cancelSuccess'))
   }
 }
 
