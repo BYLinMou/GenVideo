@@ -118,3 +118,28 @@ BGM during final compose:
 
 - If LLM/image/TTS API partially fails, fallback paths are used where possible.
 - Backend exceptions are logged to `logs/backend.log` and can be viewed in frontend via `/api/logs/tail`.
+
+## Docker Compose
+
+### Start (recommended)
+
+```bash
+docker compose up --build
+```
+
+After startup:
+
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8000`
+
+### Stop
+
+```bash
+docker compose down
+```
+
+### Notes
+
+- `docker-compose.yml` reads env vars from `.env.local` for backend API keys/settings.
+- These folders are mounted for persistence: `assets/`, `outputs/`, `logs/`.
+- Backend image includes `ffmpeg` and `fonts-noto-cjk` for video/audio compose and CJK subtitles.

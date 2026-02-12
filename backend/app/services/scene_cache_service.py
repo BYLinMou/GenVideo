@@ -1036,7 +1036,7 @@ async def find_reusable_scene_image(
         reverse=True,
     )
     top_limit = 5
-    if _profile_reference_image_paths(target_profile):
+    if _profile_reference_image_ids(target_profile) or _profile_reference_image_paths(target_profile):
         top_limit = min(200, max(5, len(ranked)))
     top = ranked[:top_limit]
 
@@ -1213,7 +1213,7 @@ async def force_llm_select_scene_image(
         return None
 
     top_limit = 20
-    if _profile_reference_image_paths(target_profile):
+    if _profile_reference_image_ids(target_profile) or _profile_reference_image_paths(target_profile):
         top_limit = min(200, max(20, len(candidates)))
     top = sorted(candidates, key=lambda item: int(item.get("llm_rank", 0)), reverse=True)[:top_limit]
     selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id)

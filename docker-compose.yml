@@ -1,0 +1,30 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: genvideo-backend
+    env_file:
+      - .env.local
+    environment:
+      - BACKEND_PORT=8000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./assets:/app/assets
+      - ./outputs:/app/outputs
+      - ./logs:/app/logs
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: genvideo-frontend
+    depends_on:
+      - backend
+    environment:
+      - VITE_PROXY_TARGET=http://backend:8000
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
