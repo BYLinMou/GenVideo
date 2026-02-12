@@ -111,7 +111,11 @@ const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
 
 const sortedJobs = computed(() => {
-  return [...jobs.value].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+  return [...jobs.value].sort((a, b) => {
+    const createdDelta = Number(b.createdAt || 0) - Number(a.createdAt || 0)
+    if (createdDelta !== 0) return createdDelta
+    return String(a.id || '').localeCompare(String(b.id || ''))
+  })
 })
 
 const effectiveSegmentGroups = computed(() => {
