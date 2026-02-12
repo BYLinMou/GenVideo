@@ -106,9 +106,9 @@ class GenerateVideoRequest(BaseModel):
     bgm_enabled: bool = True
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     novel_alias: str | None = None
-    watermark_enabled: bool = False
+    watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
-    watermark_text: str | None = None
+    watermark_text: str | None = "咕嘟看漫"
     watermark_image_path: str | None = None
     watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
     model_id: str | None = None
@@ -127,9 +127,9 @@ class RemixBgmRequest(BaseModel):
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
     novel_alias: str | None = None
-    watermark_enabled: bool = False
+    watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
-    watermark_text: str | None = None
+    watermark_text: str | None = "咕嘟看漫"
     watermark_image_path: str | None = None
     watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
 

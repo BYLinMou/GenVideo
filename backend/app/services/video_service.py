@@ -47,6 +47,7 @@ _TTS_GAIN = 1.15
 _FINAL_AUDIO_GAIN = 3.0
 _NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
 _OVERLAY_FONT_SIZE = 58
+_WATERMARK_TRAVEL_SECONDS = 22.0
 _DIALOG_QUOTE_PAIRS = {
     '"': '"',
     "\u201c": "\u201d",  # “ ”
@@ -138,7 +139,7 @@ def _compose_overlay_filter(
         opacity = max(0.05, min(float(watermark_opacity), 1.0))
         wm_w = max(140, int(width * 0.22))
         wm_h = max(60, int(height * 0.12))
-        travel_time = 18
+        travel_time = _WATERMARK_TRAVEL_SECONDS
         if watermark_type == "image":
             has_image_input = True
             filters.append(
@@ -295,7 +296,7 @@ def _build_moviepy_overlay_clips(
         return clips
 
     opacity = max(0.05, min(float(watermark_opacity), 1.0))
-    travel = 18.0
+    travel = _WATERMARK_TRAVEL_SECONDS
 
     if (watermark_type or "text").strip().lower() == "image":
         wm_path = Path(watermark_image_path or "")

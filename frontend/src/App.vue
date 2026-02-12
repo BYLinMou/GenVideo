@@ -1,6 +1,6 @@
 ﻿<script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { api } from './api'
 import { t } from './i18n'
@@ -38,9 +38,9 @@ const form = reactive({
   bgm_enabled: true,
   bgm_volume: 0.08,
   novel_alias: '',
-  watermark_enabled: false,
+  watermark_enabled: true,
   watermark_type: 'text',
-  watermark_text: '',
+  watermark_text: '咕嘟看漫',
   watermark_image_path: '',
   watermark_opacity: 0.6,
   enable_scene_image_reuse: true,
@@ -108,6 +108,7 @@ let pollingBusy = false
 const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
+const novelAliasInputRef = ref(null)
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
@@ -844,6 +845,25 @@ async function runGenerate() {
     return
   }
 
+  if (!String(form.novel_alias || '').trim()) {
+    try {
+      await ElMessageBox.confirm('还没有设置顶部书名，是否先去添加？', '提示', {
+        confirmButtonText: '去设置',
+        cancelButtonText: '继续生成',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      })
+      await nextTick()
+      novelAliasInputRef.value?.focus?.()
+      novelAliasInputRef.value?.input?.focus?.()
+      return
+    } catch (action) {
+      if (action !== 'cancel') {
+        return
+      }
+    }
+  }
+
   loading.generate = true
 
   try {
@@ -1301,6 +1321,12 @@ onUnmounted(() => {
         </div>
 
         <div>
+          <label>顶部书名（最终叠加）</label>
+          <el-input ref="novelAliasInputRef" v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable />
+          <p class="muted" style="margin: 6px 0 0">书名将作为最终合成顶栏叠加，不再写入正文</p>
+        </div>
+
+        <div>
           <label>背景音乐音量</label>
           <el-slider
             v-model="form.bgm_volume"
@@ -1430,13 +1456,6 @@ onUnmounted(() => {
           >
             {{ item }}
           </el-tag>
-        </div>
-      </div>
-
-      <div class="replace-toolbar">
-        <div class="actions">
-          <el-input v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable style="max-width: 360px" />
-          <span class="muted">书名将作为最终合成顶栏叠加，不再写入正文</span>
         </div>
       </div>
 
