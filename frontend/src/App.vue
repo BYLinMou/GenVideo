@@ -145,6 +145,24 @@ const bgmPicker = reactive({
 })
 
 const generatingRef = reactive({})
+const characterKeyMap = new WeakMap()
+let characterKeySeq = 0
+
+function getCharacterKey(character, index) {
+  if (!character || typeof character !== 'object') {
+    return `char-${index}`
+  }
+  if (!characterKeyMap.has(character)) {
+    characterKeySeq += 1
+    characterKeyMap.set(character, `char-${characterKeySeq}`)
+  }
+  return characterKeyMap.get(character)
+}
+
+function isGeneratingRef(character, index) {
+  const key = getCharacterKey(character, index)
+  return !!generatingRef[key]
+}
 
 const nameReplace = reactive({
   enabled: true,
@@ -952,12 +970,36 @@ async function uploadRefImage(event, character) {
   }
 }
 
+function buildCharacterReferencePrompt(character) {
+  const name = String(character?.name || '').trim()
+  const role = String(character?.role || '').trim()
+  const appearance = String(character?.appearance || '').trim()
+  const personality = String(character?.personality || '').trim()
+  const basePrompt = String(character?.base_prompt || '').trim()
+
+  const sections = [
+    name ? `Character: ${name}` : '',
+    role ? `Role: ${role}` : '',
+    appearance ? `Appearance: ${appearance}` : '',
+    personality ? `Personality: ${personality}` : '',
+    basePrompt ? `Style and details: ${basePrompt}` : ''
+  ].filter(Boolean)
+
+  if (!sections.length) {
+    return 'Character reference illustration, anime style, detailed design'
+  }
+
+  return sections.join('\n')
+}
+
 async function generateRefImage(character, index) {
-  generatingRef[index] = true
+  const loadingKey = getCharacterKey(character, index)
+  generatingRef[loadingKey] = true
   try {
+    const prompt = buildCharacterReferencePrompt(character)
     const created = await api.generateCharacterRefImage({
       character_name: character.name || 'character',
-      prompt: character.base_prompt || character.appearance || `${character.name} 閫?`,
+      prompt,
       resolution: '768x768'
     })
     character.reference_image_path = created.path
@@ -967,7 +1009,7 @@ async function generateRefImage(character, index) {
   } catch (error) {
     ElMessage.error(t('toast.refGenerateFailed', { error: error.message }))
   } finally {
-    generatingRef[index] = false
+    generatingRef[loadingKey] = false
   }
 }
 
@@ -1512,7 +1554,7 @@ onUnmounted(() => {
       <h2>{{ t('section.characters') }}</h2>
       <p class="muted">{{ t('field.confidence') }}：{{ (confidence * 100).toFixed(0) }}%</p>
 
-      <div class="character-card" v-for="(character, index) in characters" :key="index">
+      <div class="character-card" v-for="(character, index) in characters" :key="getCharacterKey(character, index)">
         <div class="grid">
           <div>
             <label>{{ t('field.roleName') }}</label>
@@ -1565,7 +1607,7 @@ onUnmounted(() => {
             <input type="file" accept="image/*" @change="(event) => uploadRefImage(event, character)" />
             {{ t('action.uploadReference') }}
           </label>
-          <el-button :loading="!!generatingRef[index]" @click="generateRefImage(character, index)">
+          <el-button :loading="isGeneratingRef(character, index)" @click="generateRefImage(character, index)">
             {{ t('action.generateReference') }}
           </el-button>
         </div>
