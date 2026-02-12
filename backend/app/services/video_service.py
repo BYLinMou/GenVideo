@@ -663,10 +663,18 @@ async def _synthesize_segment_tts(
 
 def _resolve_subtitle_font_path() -> str | None:
     configured = (settings.subtitle_font_path or "").strip()
-    candidates: list[Path] = []
     if configured:
         raw = Path(configured)
-        candidates.append(raw if raw.is_absolute() else project_path(configured))
+        configured_path = raw if raw.is_absolute() else project_path(configured)
+        if configured_path.exists():
+            return str(configured_path)
+        logger.warning("Configured SUBTITLE_FONT_PATH not found: %s", configured_path)
+
+    bundled = project_path("backend/app/fonts/NotoSansCJKsc-Regular.otf")
+    if bundled.exists():
+        return str(bundled)
+
+    candidates: list[Path] = []
 
     candidates.extend(
         [
