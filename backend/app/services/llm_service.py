@@ -17,6 +17,7 @@ from .prompt_templates import (
     build_character_identity_guard,
     build_fallback_segment_image_prompt,
     build_final_segment_image_prompt,
+    build_story_world_summary_prompt,
     build_smart_segmentation_prompt,
 )
 
@@ -456,18 +457,63 @@ def _character_identity_guard(character: CharacterSuggestion) -> str:
     )
 
 
-def _fallback_segment_image_prompt(character: CharacterSuggestion, segment_text: str) -> str:
+def _fallback_segment_image_prompt(
+    character: CharacterSuggestion,
+    segment_text: str,
+    story_world_context: str | None = None,
+) -> str:
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
-    return build_fallback_segment_image_prompt(guard=guard, scene_text=scene_text)
+    return build_fallback_segment_image_prompt(
+        guard=guard,
+        scene_text=scene_text,
+        story_world_context=_clean_text(story_world_context, 320),
+    )
 
 
-def _fallback_segment_image_bundle(character: CharacterSuggestion, segment_text: str) -> dict:
-    prompt = _fallback_segment_image_prompt(character, segment_text)
+def _fallback_segment_image_bundle(
+    character: CharacterSuggestion,
+    segment_text: str,
+    story_world_context: str | None = None,
+) -> dict:
+    prompt = _fallback_segment_image_prompt(character, segment_text, story_world_context=story_world_context)
     return {
         "prompt": prompt,
         "metadata": _fallback_scene_metadata(segment_text, prompt),
     }
+
+
+async def summarize_story_world_context(text: str, model_id: str | None) -> str:
+    clean_text = _clean_text(text, 14000)
+    if not clean_text or not settings.llm_api_key:
+        return ""
+
+    selected_model = model_id or settings.llm_default_model
+    payload = {
+        "model": selected_model,
+        "messages": [
+            {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
+            {"role": "user", "content": build_story_world_summary_prompt(clean_text)},
+        ],
+        "temperature": 0.1,
+    }
+    headers = {
+        "Authorization": f"Bearer {settings.llm_api_key}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(_base_url("/chat/completions"), headers=headers, json=payload)
+            response.raise_for_status()
+            body = response.json()
+            content = body["choices"][0]["message"]["content"]
+            parsed = _extract_json_object(content) or {}
+            summary = _clean_text(str(parsed.get("world_summary", "")), 320)
+            return summary
+    except Exception:
+        logger.exception("Story world context summarization failed")
+        return ""
 
 
 async def build_segment_image_bundle(
@@ -475,11 +521,16 @@ async def build_segment_image_bundle(
     segment_text: str,
     model_id: str | None,
     related_reference_image_paths: list[str] | None = None,
+    story_world_context: str | None = None,
 ) -> dict:
-    fallback_bundle = _fallback_segment_image_bundle(character, segment_text)
-    fallback_prompt = fallback_bundle["prompt"]
+    fallback_bundle = _fallback_segment_image_bundle(
+        character,
+        segment_text,
+        story_world_context=story_world_context,
+    )
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
+    world_context = _clean_text(story_world_context, 320)
     if not settings.llm_api_key:
         return fallback_bundle
 
@@ -495,6 +546,7 @@ async def build_segment_image_bundle(
             "has_reference_image": bool(character.reference_image_path),
             "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:2],
         },
+        "story_world_context": world_context,
         "current_segment": _clean_text(segment_text, 1800),
         "output_schema": {
             "prompt": "",
@@ -529,7 +581,12 @@ async def build_segment_image_bundle(
             parsed = _extract_json_object(content)
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
-                final_prompt = build_final_segment_image_prompt(guard=guard, scene_text=scene_text, candidate=candidate)
+                final_prompt = build_final_segment_image_prompt(
+                    guard=guard,
+                    scene_text=scene_text,
+                    candidate=candidate,
+                    story_world_context=world_context,
+                )
                 metadata = _normalize_scene_metadata(parsed)
                 if not metadata.get("action_hint"):
                     metadata["action_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("action_hint", "")

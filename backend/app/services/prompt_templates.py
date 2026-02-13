@@ -23,6 +23,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Prefer 2D Japanese anime style, clean line art and cel shading; avoid photorealistic or 3D-render look.",
     "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
     "Scene/background/action must be inferred from current segment text.",
+    "If story_world_context is provided, keep era/architecture/costume/props/culture consistent with that world setting.",
     "Output one concise production-ready prompt in English.",
     "Also output strict scene metadata for cache-reuse matching.",
     "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
@@ -30,6 +31,18 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Scene elements must be concrete visual nouns/background details.",
     "No markdown, no explanation.",
 )
+
+
+def build_story_world_summary_prompt(text: str) -> str:
+    return (
+        "You summarize the global world setting for a novel-to-video pipeline. "
+        "Return strict JSON only in schema: "
+        '{"world_summary":""}. '
+        "world_summary must be one concise English sentence (max 40 words) that captures era, cultural setting, architecture/props/costume tone, "
+        "and visual world constraints. Prefer broad stable setting, not per-scene details."
+        "\n\nNovel text:\n"
+        f"{text[:14000]}"
+    )
 
 SCENE_REUSE_SELECTOR_RULES = (
     "This decision is strict: if uncertain, return should_reuse=false.",
@@ -79,9 +92,15 @@ def build_character_identity_guard(
     )
 
 
-def build_fallback_segment_image_prompt(guard: str, scene_text: str) -> str:
+def build_fallback_segment_image_prompt(guard: str, scene_text: str, story_world_context: str | None = None) -> str:
+    world_clause = (
+        f"Global world setting consistency requirement: {story_world_context.strip()}. "
+        if (story_world_context or "").strip()
+        else ""
+    )
     return (
         f"{guard} "
+        f"{world_clause}"
         "Build one single image frame according to this current plot segment: "
         f"{scene_text}. "
         "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
@@ -90,9 +109,20 @@ def build_fallback_segment_image_prompt(guard: str, scene_text: str) -> str:
     )
 
 
-def build_final_segment_image_prompt(guard: str, scene_text: str, candidate: str) -> str:
+def build_final_segment_image_prompt(
+    guard: str,
+    scene_text: str,
+    candidate: str,
+    story_world_context: str | None = None,
+) -> str:
+    world_clause = (
+        f"Global world setting consistency requirement: {story_world_context.strip()}. "
+        if (story_world_context or "").strip()
+        else ""
+    )
     return (
         f"{guard} "
+        f"{world_clause}"
         f"Current plot segment: {scene_text}. "
         "If character is not necessary for this segment, you may generate scene-only frame. "
         "Scene/background/action must follow current plot segment. "

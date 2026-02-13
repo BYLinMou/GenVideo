@@ -24,6 +24,7 @@ from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
+    summarize_story_world_context,
 )
 from .segmentation_service import build_segment_plan, resolve_precomputed_segments, select_segments_by_range
 from .scene_cache_service import (
@@ -1488,6 +1489,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         resolution = _parse_resolution(payload.resolution)
         characters = _sanitize_character_voices(list(payload.characters), narrator_voice=_NARRATOR_VOICE_ID)
+        story_world_context = await summarize_story_world_context(payload.text, payload.model_id)
+        if story_world_context:
+            logger.info("Story world context summary: %s", story_world_context)
         total = len(segments)
         no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
         lookback_scenes = no_repeat_window
@@ -1556,6 +1560,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     segment_text=segment_text,
                     model_id=payload.model_id,
                     related_reference_image_paths=related_reference_paths,
+                    story_world_context=story_world_context,
                 )
             )
             audio_task = asyncio.create_task(
