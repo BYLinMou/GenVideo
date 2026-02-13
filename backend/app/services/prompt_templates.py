@@ -130,11 +130,25 @@ def build_final_segment_image_prompt(
     )
 
 
-def build_character_analysis_prompt(text: str, depth: str, allowed_ids: str, voice_lines: str) -> str:
+def build_character_analysis_prompt(
+    text: str,
+    depth: str,
+    allowed_ids: str,
+    voice_lines: str,
+    story_world_context: str | None = None,
+) -> str:
     detail = "Output detailed fields" if depth == "detailed" else "Output concise fields"
+    world_clause = (
+        f"Global story world context: {story_world_context.strip()}. "
+        if (story_world_context or "").strip()
+        else ""
+    )
     return (
         "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
         f"{detail}. "
+        f"{world_clause}"
+        "Character setting must be consistent with the story world context: era, region/culture, social identity, clothing, props and tone. "
+        "Unless the text explicitly says otherwise, avoid cross-world mismatch (e.g. ancient Chinese setting with modern/western/Japanese role styling). "
         "voice_id must be selected strictly from the allowed voice IDs below. "
         "Do not invent any new voice name or ID. "
         "If unsure, choose the closest one from the list. "

@@ -658,7 +658,7 @@ def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
     return output
 
 
-def _character_prompt(text: str, depth: str) -> str:
+def _character_prompt(text: str, depth: str, story_world_context: str | None = None) -> str:
     voice_lines = "\n".join(
         f"- {voice.id} | {voice.name} | {voice.gender}/{voice.age} | {voice.description}" for voice in VOICE_INFOS
     )
@@ -668,6 +668,7 @@ def _character_prompt(text: str, depth: str) -> str:
         depth=depth,
         allowed_ids=allowed_ids,
         voice_lines=voice_lines,
+        story_world_context=_clean_text(story_world_context, 320),
     )
 
 
@@ -838,11 +839,15 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
     if not settings.llm_api_key:
         raise LLMServiceError("LLM API key is missing")
 
+    story_world_context = await summarize_story_world_context(text, model_id)
+    if story_world_context:
+        logger.info("Character analysis story world context: %s", story_world_context)
+
     payload = {
         "model": selected_model,
         "messages": [
             {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
-            {"role": "user", "content": _character_prompt(text, depth)},
+            {"role": "user", "content": _character_prompt(text, depth, story_world_context=story_world_context)},
         ],
         "temperature": 0.2,
     }
