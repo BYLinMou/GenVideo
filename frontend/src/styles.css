@@ -164,16 +164,24 @@ label {
   border-radius: 8px;
   padding: 8px 10px;
   background: #ffffff;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease, transform 0.18s ease;
+  will-change: transform;
 }
 
 .job-list-item.active {
   border-color: #3b82f6;
   box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+  background: #f8fbff;
+  transform: translateY(-1px);
 }
 
 .job-list-main {
   cursor: pointer;
   min-width: 0;
+}
+
+.job-list-item:hover {
+  border-color: #d0d5dd;
 }
 
 .job-list-id {

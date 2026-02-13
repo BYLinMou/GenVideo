@@ -1,6 +1,6 @@
 ﻿<script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { api } from './api'
 import { t } from './i18n'
@@ -38,9 +38,9 @@ const form = reactive({
   bgm_enabled: true,
   bgm_volume: 0.08,
   novel_alias: '',
-  watermark_enabled: false,
+  watermark_enabled: true,
   watermark_type: 'text',
-  watermark_text: '',
+  watermark_text: '咕嘟看漫',
   watermark_image_path: '',
   watermark_opacity: 0.6,
   enable_scene_image_reuse: true,
@@ -53,7 +53,8 @@ const confidence = ref(0)
 const segmentPreview = reactive({
   total_segments: 0,
   total_sentences: 0,
-  segments: []
+  segments: [],
+  request_signature: ''
 })
 
 const backendLogs = ref([])
@@ -107,9 +108,14 @@ let pollingBusy = false
 const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
+const novelAliasInputRef = ref(null)
 
 const sortedJobs = computed(() => {
-  return [...jobs.value].sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0))
+  return [...jobs.value].sort((a, b) => {
+    const createdDelta = Number(b.createdAt || 0) - Number(a.createdAt || 0)
+    if (createdDelta !== 0) return createdDelta
+    return String(a.id || '').localeCompare(String(b.id || ''))
+  })
 })
 
 const effectiveSegmentGroups = computed(() => {
@@ -139,6 +145,24 @@ const bgmPicker = reactive({
 })
 
 const generatingRef = reactive({})
+const characterKeyMap = new WeakMap()
+let characterKeySeq = 0
+
+function getCharacterKey(character, index) {
+  if (!character || typeof character !== 'object') {
+    return `char-${index}`
+  }
+  if (!characterKeyMap.has(character)) {
+    characterKeySeq += 1
+    characterKeyMap.set(character, `char-${characterKeySeq}`)
+  }
+  return characterKeyMap.get(character)
+}
+
+function isGeneratingRef(character, index) {
+  const key = getCharacterKey(character, index)
+  return !!generatingRef[key]
+}
 
 const nameReplace = reactive({
   enabled: true,
@@ -476,6 +500,12 @@ function removeJobRecord(jobId) {
   jobs.value = jobs.value.filter((item) => item.id !== id)
   if (activeJobId.value === id) {
     activeJobId.value = jobs.value[0]?.id || ''
+    const next = jobs.value.find((item) => item.id === activeJobId.value)
+    if (next) {
+      syncJobViewFromRecord(next)
+    } else {
+      resetJob()
+    }
   }
 }
 
@@ -491,8 +521,27 @@ function syncJobViewFromRecord(record) {
   job.message = record.message || ''
   job.currentSegment = Number(record.currentSegment || 0)
   job.totalSegments = Number(record.totalSegments || 0)
-  job.videoUrl = record.videoUrl || ''
-  job.clipPreviewUrls = record.clipPreviewUrls || []
+  job.videoUrl = normalizeRuntimeUrl(record.videoUrl || '')
+  job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
+}
+
+function normalizeRuntimeUrl(raw) {
+  const value = String(raw || '').trim()
+  if (!value) return ''
+  if (value.startsWith('/')) {
+    return `${window.location.origin}${value}`
+  }
+  try {
+    const parsed = new URL(value)
+    if (window.location.hostname && parsed.hostname !== window.location.hostname) {
+      if (parsed.pathname.startsWith('/api/') || parsed.pathname.startsWith('/assets/')) {
+        return `${window.location.origin}${parsed.pathname}${parsed.search || ''}`
+      }
+    }
+    return value
+  } catch {
+    return value
+  }
 }
 
 function selectJob(jobId) {
@@ -516,8 +565,8 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     progress: Number(status.progress || 0),
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
-    clipPreviewUrls: status.clip_preview_urls || [],
-    videoUrl: status.status === 'completed' ? api.getVideoUrl(id) : '',
+    clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
+    videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
     updatedAt: Date.now()
   }
   upsertJobRecord(next)
@@ -736,6 +785,7 @@ async function runSegmentPreview() {
     segmentPreview.total_segments = data.total_segments || 0
     segmentPreview.total_sentences = data.total_sentences || 0
     segmentPreview.segments = data.segments || []
+    segmentPreview.request_signature = data.request_signature || ''
     ElMessage.success(
       t('toast.segmentSuccess', {
         segments: segmentPreview.total_segments,
@@ -780,9 +830,10 @@ async function pollJobsOnce() {
           if (!updated) return
 
           if (status.status === 'completed') {
-            upsertJobRecord({ id, videoUrl: api.getVideoUrl(id), updatedAt: Date.now() })
+            const completedUrl = normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id))
+            upsertJobRecord({ id, videoUrl: completedUrl, updatedAt: Date.now() })
             if (activeJobId.value === id) {
-              job.videoUrl = api.getVideoUrl(id)
+              job.videoUrl = completedUrl
             }
           }
         } catch (error) {
@@ -816,6 +867,25 @@ async function runGenerate() {
     return
   }
 
+  if (!String(form.novel_alias || '').trim()) {
+    try {
+      await ElMessageBox.confirm('还没有设置顶部书名，是否先去添加？', '提示', {
+        confirmButtonText: '去设置',
+        cancelButtonText: '继续生成',
+        type: 'warning',
+        distinguishCancelAndClose: true
+      })
+      await nextTick()
+      novelAliasInputRef.value?.focus?.()
+      novelAliasInputRef.value?.input?.focus?.()
+      return
+    } catch (action) {
+      if (action !== 'cancel') {
+        return
+      }
+    }
+  }
+
   loading.generate = true
 
   try {
@@ -823,6 +893,10 @@ async function runGenerate() {
       text: textForRun,
       characters: characters.value,
       segment_method: form.segment_method,
+      segment_request_signature: segmentPreview.request_signature || null,
+      precomputed_segments: Array.isArray(segmentPreview.segments)
+        ? segmentPreview.segments.map((item) => String(item?.text || '').trim()).filter(Boolean)
+        : null,
       sentences_per_segment: form.sentences_per_segment,
       max_segment_groups: form.max_segment_groups,
       resolution: form.resolution,
@@ -896,12 +970,36 @@ async function uploadRefImage(event, character) {
   }
 }
 
+function buildCharacterReferencePrompt(character) {
+  const name = String(character?.name || '').trim()
+  const role = String(character?.role || '').trim()
+  const appearance = String(character?.appearance || '').trim()
+  const personality = String(character?.personality || '').trim()
+  const basePrompt = String(character?.base_prompt || '').trim()
+
+  const sections = [
+    name ? `Character: ${name}` : '',
+    role ? `Role: ${role}` : '',
+    appearance ? `Appearance: ${appearance}` : '',
+    personality ? `Personality: ${personality}` : '',
+    basePrompt ? `Style and details: ${basePrompt}` : ''
+  ].filter(Boolean)
+
+  if (!sections.length) {
+    return 'Character reference illustration, anime style, detailed design'
+  }
+
+  return sections.join('\n')
+}
+
 async function generateRefImage(character, index) {
-  generatingRef[index] = true
+  const loadingKey = getCharacterKey(character, index)
+  generatingRef[loadingKey] = true
   try {
+    const prompt = buildCharacterReferencePrompt(character)
     const created = await api.generateCharacterRefImage({
       character_name: character.name || 'character',
-      prompt: character.base_prompt || character.appearance || `${character.name} 閫?`,
+      prompt,
       resolution: '768x768'
     })
     character.reference_image_path = created.path
@@ -911,7 +1009,7 @@ async function generateRefImage(character, index) {
   } catch (error) {
     ElMessage.error(t('toast.refGenerateFailed', { error: error.message }))
   } finally {
-    generatingRef[index] = false
+    generatingRef[loadingKey] = false
   }
 }
 
@@ -1102,12 +1200,33 @@ function openJob(jobId) {
   persistJobSnapshot()
 }
 
-function removeJob(jobId) {
-  removeJobRecord(jobId)
+async function removeJob(jobId) {
+  const id = String(jobId || '')
+  if (!id) return
+
+  const target = jobs.value.find((item) => item.id === id)
+  const needCancel = target ? ['queued', 'running'].includes(target.status) : false
+
+  if (needCancel) {
+    try {
+      await api.cancelJob(id)
+    } catch (error) {
+      const message = String(error?.message || '')
+      if (!message.includes('404')) {
+        ElMessage.error(t('toast.cancelFailed', { error: error.message }))
+        return
+      }
+    }
+  }
+
+  removeJobRecord(id)
   persistJobSnapshot()
   if (!jobs.value.length) {
-    resetJob()
     stopPolling()
+  }
+
+  if (needCancel) {
+    ElMessage.success(t('toast.cancelSuccess'))
   }
 }
 
@@ -1248,6 +1367,12 @@ onUnmounted(() => {
         </div>
 
         <div>
+          <label>顶部书名（最终叠加）</label>
+          <el-input ref="novelAliasInputRef" v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable />
+          <p class="muted" style="margin: 6px 0 0">书名将作为最终合成顶栏叠加，不再写入正文</p>
+        </div>
+
+        <div>
           <label>背景音乐音量</label>
           <el-slider
             v-model="form.bgm_volume"
@@ -1380,13 +1505,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="replace-toolbar">
-        <div class="actions">
-          <el-input v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable style="max-width: 360px" />
-          <span class="muted">书名将作为最终合成顶栏叠加，不再写入正文</span>
-        </div>
-      </div>
-
       <div v-if="replacementEntries.length" class="replace-list">
         <div class="replace-item" v-for="entry in replacementEntries" :key="entry.word">
           <el-checkbox v-model="entry.enabled" :disabled="!entry.replacement.trim()" />
@@ -1436,7 +1554,7 @@ onUnmounted(() => {
       <h2>{{ t('section.characters') }}</h2>
       <p class="muted">{{ t('field.confidence') }}：{{ (confidence * 100).toFixed(0) }}%</p>
 
-      <div class="character-card" v-for="(character, index) in characters" :key="index">
+      <div class="character-card" v-for="(character, index) in characters" :key="getCharacterKey(character, index)">
         <div class="grid">
           <div>
             <label>{{ t('field.roleName') }}</label>
@@ -1489,7 +1607,7 @@ onUnmounted(() => {
             <input type="file" accept="image/*" @change="(event) => uploadRefImage(event, character)" />
             {{ t('action.uploadReference') }}
           </label>
-          <el-button :loading="!!generatingRef[index]" @click="generateRefImage(character, index)">
+          <el-button :loading="isGeneratingRef(character, index)" @click="generateRefImage(character, index)">
             {{ t('action.generateReference') }}
           </el-button>
         </div>
@@ -1515,8 +1633,9 @@ onUnmounted(() => {
           :key="item.id"
           class="job-list-item"
           :class="{ active: item.id === activeJobId }"
+          @click="openJob(item.id)"
         >
-          <div class="job-list-main" @click="openJob(item.id)">
+          <div class="job-list-main">
             <div class="job-list-id">{{ item.id }}</div>
             <div class="job-list-meta">
               <span>{{ item.status }}</span>
@@ -1525,7 +1644,7 @@ onUnmounted(() => {
               <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
             </div>
           </div>
-          <el-button size="small" type="danger" plain @click="removeJob(item.id)">移除</el-button>
+          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">移除</el-button>
         </div>
       </div>
 

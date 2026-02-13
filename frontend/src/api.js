@@ -1,4 +1,28 @@
-const BASE = import.meta.env.VITE_API_BASE_URL || ''
+const BASE = (import.meta.env.VITE_API_BASE_URL || '').trim()
+
+function stripTrailingSlash(value) {
+  return String(value || '').replace(/\/+$/, '')
+}
+
+function buildApiUrl(path) {
+  const normalizedPath = String(path || '')
+  if (!BASE) return normalizedPath
+
+  if (BASE.startsWith('/')) {
+    return `${stripTrailingSlash(BASE)}${normalizedPath}`
+  }
+
+  try {
+    const parsed = new URL(BASE)
+    if (typeof window !== 'undefined' && window.location?.hostname && parsed.hostname !== window.location.hostname) {
+      return normalizedPath
+    }
+    const basePath = stripTrailingSlash(parsed.pathname)
+    return `${parsed.origin}${basePath}${normalizedPath}`
+  } catch {
+    return `${stripTrailingSlash(BASE)}${normalizedPath}`
+  }
+}
 
 async function parseJson(response) {
   const text = await response.text()
@@ -10,7 +34,8 @@ async function parseJson(response) {
 }
 
 async function request(path, options = {}) {
-  const response = await fetch(`${BASE}${path}`, {
+  const response = await fetch(buildApiUrl(path), {
+    cache: options.cache || 'no-store',
     headers: {
       ...(options.headers || {})
     },
@@ -79,13 +104,13 @@ export const api = {
     return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
   },
   getJob(jobId) {
-    return request(`/api/jobs/${jobId}`)
+    return request(`/api/jobs/${jobId}?_ts=${Date.now()}`, { cache: 'no-store' })
   },
   getVideoUrl(jobId) {
-    return `${BASE}/api/jobs/${jobId}/video`
+    return buildApiUrl(`/api/jobs/${jobId}/video`)
   },
   getClipUrl(jobId, clipIndex) {
-    return `${BASE}/api/jobs/${jobId}/clips/${clipIndex}`
+    return buildApiUrl(`/api/jobs/${jobId}/clips/${clipIndex}`)
   },
   listCharacterRefImages() {
     return request('/api/character-reference-images')
@@ -120,6 +145,6 @@ export const api = {
   getCharacterRefImageUrl(path) {
     const normalized = path.replaceAll('\\', '/')
     const filename = normalized.split('/').pop()
-    return `${BASE}/assets/character_refs/${encodeURIComponent(filename)}`
+    return buildApiUrl(`/assets/character_refs/${encodeURIComponent(filename)}`)
   }
 }

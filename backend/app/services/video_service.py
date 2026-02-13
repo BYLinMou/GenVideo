@@ -23,11 +23,8 @@ from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
-    group_sentences,
-    segment_by_fixed,
-    segment_by_smart,
-    split_sentences,
 )
+from .segmentation_service import build_segment_plan, resolve_precomputed_segments
 from .scene_cache_service import (
     build_scene_descriptor,
     ensure_scene_cache_paths,
@@ -50,6 +47,7 @@ _TTS_GAIN = 1.15
 _FINAL_AUDIO_GAIN = 3.0
 _NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
 _OVERLAY_FONT_SIZE = 58
+_WATERMARK_TRAVEL_SECONDS = 22.0
 _DIALOG_QUOTE_PAIRS = {
     '"': '"',
     "\u201c": "\u201d",  # “ ”
@@ -141,7 +139,7 @@ def _compose_overlay_filter(
         opacity = max(0.05, min(float(watermark_opacity), 1.0))
         wm_w = max(140, int(width * 0.22))
         wm_h = max(60, int(height * 0.12))
-        travel_time = 18
+        travel_time = _WATERMARK_TRAVEL_SECONDS
         if watermark_type == "image":
             has_image_input = True
             filters.append(
@@ -298,7 +296,7 @@ def _build_moviepy_overlay_clips(
         return clips
 
     opacity = max(0.05, min(float(watermark_opacity), 1.0))
-    travel = 18.0
+    travel = _WATERMARK_TRAVEL_SECONDS
 
     if (watermark_type or "text").strip().lower() == "image":
         wm_path = Path(watermark_image_path or "")
@@ -665,10 +663,18 @@ async def _synthesize_segment_tts(
 
 def _resolve_subtitle_font_path() -> str | None:
     configured = (settings.subtitle_font_path or "").strip()
-    candidates: list[Path] = []
     if configured:
         raw = Path(configured)
-        candidates.append(raw if raw.is_absolute() else project_path(configured))
+        configured_path = raw if raw.is_absolute() else project_path(configured)
+        if configured_path.exists():
+            return str(configured_path)
+        logger.warning("Configured SUBTITLE_FONT_PATH not found: %s", configured_path)
+
+    bundled = project_path("backend/app/fonts/NotoSansCJKsc-Regular.otf")
+    if bundled.exists():
+        return str(bundled)
+
+    candidates: list[Path] = []
 
     candidates.extend(
         [
@@ -1228,17 +1234,36 @@ def _render_final_sync(
 
 
 async def _segment_text(payload: GenerateVideoRequest) -> tuple[list[str], int]:
-    if payload.segment_method == "fixed":
-        segments = segment_by_fixed(payload.text)
-        return segments, 0
+    precomputed = resolve_precomputed_segments(
+        text=payload.text,
+        method=payload.segment_method,
+        sentences_per_segment=payload.sentences_per_segment,
+        fixed_size=120,
+        model_id=payload.model_id,
+        request_signature=payload.segment_request_signature,
+        precomputed_segments=payload.precomputed_segments,
+    )
+    if precomputed:
+        total_sentences = 0
+        if payload.segment_method == "sentence":
+            plan = await build_segment_plan(
+                text=payload.text,
+                method="sentence",
+                sentences_per_segment=payload.sentences_per_segment,
+                fixed_size=120,
+                model_id=payload.model_id,
+            )
+            total_sentences = plan.total_sentences
+        return precomputed, total_sentences
 
-    if payload.segment_method == "smart":
-        segments = await segment_by_smart(payload.text, payload.model_id)
-        return segments, 0
-
-    sentences = split_sentences(payload.text)
-    segments = group_sentences(sentences, payload.sentences_per_segment)
-    return segments, len(sentences)
+    plan = await build_segment_plan(
+        text=payload.text,
+        method=payload.segment_method,
+        sentences_per_segment=payload.sentences_per_segment,
+        fixed_size=120,
+        model_id=payload.model_id,
+    )
+    return plan.segments, plan.total_sentences
 
 
 def _update_job(
@@ -1255,7 +1280,7 @@ def _update_job(
 ) -> None:
     previews: list[str] = []
     if clip_paths:
-        previews = [f"{base_url}/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
+        previews = [f"/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1265,7 +1290,7 @@ def _update_job(
             message=message,
             current_segment=max(0, int(current_segment or 0)),
             total_segments=max(0, int(total_segments or 0)),
-            output_video_url=f"{base_url}/api/jobs/{job_id}/video" if output_video_path else None,
+            output_video_url=f"/api/jobs/{job_id}/video" if output_video_path else None,
             output_video_path=output_video_path,
             clip_count=len(clip_paths or []),
             clip_preview_urls=previews,
@@ -1615,7 +1640,11 @@ def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
     _update_job(job_id, base_url, "queued", 0.0, "queued", "Job queued")
 
     def runner() -> None:
-        asyncio.run(run_video_job(job_id=job_id, payload=payload, base_url=base_url))
+        try:
+            asyncio.run(run_video_job(job_id=job_id, payload=payload, base_url=base_url))
+        except Exception as exc:
+            logger.exception("Job runner crashed before async job handler completed: %s", job_id)
+            _update_job(job_id, base_url, "failed", 1.0, "error", f"Video generation failed: {exc}")
 
     thread = Thread(target=runner, daemon=True)
     thread.start()

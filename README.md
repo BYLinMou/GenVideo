@@ -39,11 +39,13 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 
 ```bash
 cd backend
-python -m venv .venv
-.venv\Scripts\activate
+conda create -n genvideo python=3.13 -y
+conda activate genvideo
 pip install -r requirements.txt
 python run.py
 ```
+
+If `genvideo` already exists, skip the `conda create` step.
 
 Default: `http://localhost:8000`
 

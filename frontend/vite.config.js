@@ -7,6 +7,7 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 5173,
+    allowedHosts: ['genvideo.yeelam.site'],
     proxy: {
       '/api': {
         target: backendTarget,

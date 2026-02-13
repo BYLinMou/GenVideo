@@ -79,12 +79,15 @@ class SegmentTextResponse(BaseModel):
     segments: list[SegmentItem]
     total_segments: int
     total_sentences: int
+    request_signature: str = ""
 
 
 class GenerateVideoRequest(BaseModel):
     text: str
     characters: list[CharacterSuggestion]
     segment_method: Literal["sentence", "fixed", "smart"] = "sentence"
+    segment_request_signature: str | None = None
+    precomputed_segments: list[str] | None = None
     sentences_per_segment: int = Field(default=5, ge=1, le=50)
     max_segment_groups: int = Field(default=0, ge=0, le=10000)
     resolution: str = "1920x1080"
@@ -103,9 +106,9 @@ class GenerateVideoRequest(BaseModel):
     bgm_enabled: bool = True
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     novel_alias: str | None = None
-    watermark_enabled: bool = False
+    watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
-    watermark_text: str | None = None
+    watermark_text: str | None = "咕嘟看漫"
     watermark_image_path: str | None = None
     watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
     model_id: str | None = None
@@ -124,9 +127,9 @@ class RemixBgmRequest(BaseModel):
     bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
     novel_alias: str | None = None
-    watermark_enabled: bool = False
+    watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
-    watermark_text: str | None = None
+    watermark_text: str | None = "咕嘟看漫"
     watermark_image_path: str | None = None
     watermark_opacity: float = Field(default=0.6, ge=0.05, le=1.0)
 

@@ -44,11 +44,9 @@ from .services.llm_service import (
     LLMServiceError,
     analyze_characters,
     generate_novel_aliases,
-    group_sentences,
-    segment_by_fixed,
-    segment_by_smart,
-    split_sentences,
 )
+from .services.segmentation_service import build_segment_plan
+from .services.segmentation_service import count_sentences
 from .services.model_service import get_models
 from .services.video_service import _render_final_sync, cancel_job, create_job
 from .state import job_store
@@ -199,26 +197,26 @@ async def segment_text(payload: SegmentTextRequest) -> SegmentTextResponse:
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    total_sentences = len(split_sentences(text))
-    if payload.method == "fixed":
-        pieces = segment_by_fixed(text, chunk_size=payload.fixed_size)
-    elif payload.method == "smart":
-        pieces = await segment_by_smart(text, payload.model_id)
-    else:
-        sentences = split_sentences(text)
-        pieces = group_sentences(sentences, payload.sentences_per_segment)
+    plan = await build_segment_plan(
+        text=text,
+        method=payload.method,
+        sentences_per_segment=payload.sentences_per_segment,
+        fixed_size=payload.fixed_size,
+        model_id=payload.model_id,
+    )
 
     segments = []
-    for index, item in enumerate(pieces):
+    for index, item in enumerate(plan.segments):
         count = 0
         if payload.method == "sentence":
-            count = len(split_sentences(item))
+            count = count_sentences(item)
         segments.append(SegmentItem(index=index, text=item, sentence_count=count))
 
     return SegmentTextResponse(
         segments=segments,
         total_segments=len(segments),
-        total_sentences=total_sentences,
+        total_sentences=plan.total_sentences,
+        request_signature=plan.request_signature,
     )
 
 
@@ -423,7 +421,7 @@ async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> 
     return RemixBgmResponse(
         job_id=job_id,
         status="completed",
-        output_video_url=f"{base_url}/api/jobs/{job_id}/video",
+        output_video_url=f"/api/jobs/{job_id}/video",
     )
 
 
