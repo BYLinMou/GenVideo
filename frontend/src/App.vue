@@ -526,6 +526,17 @@ function syncJobViewFromRecord(record) {
   job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
 }
 
+function resetClipVideoEnabledForJob(jobId) {
+  const id = String(jobId || '').trim()
+  if (!id) return
+  const prefix = `${id}:`
+  Object.keys(clipVideoEnabled).forEach((key) => {
+    if (key.startsWith(prefix)) {
+      delete clipVideoEnabled[key]
+    }
+  })
+}
+
 function clipVideoKey(index) {
   return `${String(job.id || '')}:${Number(index)}`
 }
@@ -541,6 +552,11 @@ function enableClipVideo(index) {
 function getClipThumbnailUrl(index) {
   if (!job.id) return ''
   return api.getClipThumbnailUrl(job.id, Number(index))
+}
+
+function getClipVideoUrl(index) {
+  if (!job.id) return ''
+  return api.getClipUrl(job.id, Number(index))
 }
 
 function normalizeRuntimeUrl(raw) {
@@ -565,6 +581,7 @@ function normalizeRuntimeUrl(raw) {
 function selectJob(jobId) {
   const id = String(jobId || '')
   if (!id) return
+  resetClipVideoEnabledForJob(id)
   activeJobId.value = id
   const found = jobs.value.find((item) => item.id === id)
   if (found) {
@@ -1785,7 +1802,7 @@ onUnmounted(() => {
           </div>
           <video
             v-else
-            :src="url"
+            :src="getClipVideoUrl(index)"
             :poster="getClipThumbnailUrl(index)"
             controls
             preload="none"
