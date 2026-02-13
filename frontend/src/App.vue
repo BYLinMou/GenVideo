@@ -576,6 +576,52 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
   return next
 }
 
+async function forceRefreshJobStatus(jobId, options = {}) {
+  const id = String(jobId || '').trim()
+  const { silent = false } = options
+  if (!id) return null
+  try {
+    const status = await api.getJob(id)
+    return syncActiveJobRecordFromApiStatus(id, status)
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.statusFailed', { error: error.message }))
+    }
+    return null
+  }
+}
+
+async function syncJobsFromBackend(options = {}) {
+  const { activateLatest = false } = options
+  try {
+    const data = await api.listJobs(120)
+    const serverJobs = Array.isArray(data?.jobs) ? data.jobs : []
+    serverJobs.forEach((item) => {
+      const id = String(item?.job_id || item?.id || '').trim()
+      if (!id) return
+      syncActiveJobRecordFromApiStatus(id, item)
+    })
+
+    if (!activeJobId.value && activateLatest && jobs.value.length) {
+      const first = sortedJobs.value[0]
+      if (first?.id) {
+        selectJob(first.id)
+      }
+    } else if (activeJobId.value) {
+      const current = jobs.value.find((item) => item.id === activeJobId.value)
+      if (current) {
+        syncJobViewFromRecord(current)
+      }
+    }
+
+    persistJobSnapshot()
+    return serverJobs.length
+  } catch (error) {
+    console.warn('[jobs] sync from backend failed:', error)
+    return 0
+  }
+}
+
 function persistJobSnapshot() {
   if (typeof window === 'undefined') return
   const payload = jobs.value
@@ -819,7 +865,10 @@ async function pollJobsOnce() {
   if (pollingBusy) return
   const ids = jobs.value.map((item) => String(item.id || '')).filter(Boolean)
   if (!ids.length) {
-    stopPolling()
+    const synced = await syncJobsFromBackend({ activateLatest: true })
+    if (!synced || !jobs.value.length) {
+      stopPolling()
+    }
     return
   }
 
@@ -966,8 +1015,8 @@ async function resumeCurrentJob() {
   try {
     await api.resumeJob(activeJobId.value)
     ElMessage.success(t('toast.resumeRequested'))
-    const status = await api.getJob(activeJobId.value)
-    syncActiveJobRecordFromApiStatus(activeJobId.value, status)
+    await forceRefreshJobStatus(activeJobId.value, { silent: true })
+    await syncJobsFromBackend()
     startPolling()
   } catch (error) {
     ElMessage.error(t('toast.resumeFailed', { error: error.message }))
@@ -1203,8 +1252,11 @@ async function recoverJobById() {
     return
   }
   try {
-    const status = await api.getJob(id)
-    syncActiveJobRecordFromApiStatus(id, status)
+    const updated = await forceRefreshJobStatus(id, { silent: true })
+    if (!updated) {
+      throw new Error('job not found')
+    }
+    await syncJobsFromBackend({ activateLatest: true })
     selectJob(id)
     recoverJobIdInput.value = ''
     persistJobSnapshot()
@@ -1215,8 +1267,9 @@ async function recoverJobById() {
   }
 }
 
-function openJob(jobId) {
+async function openJob(jobId) {
   selectJob(jobId)
+  await forceRefreshJobStatus(jobId, { silent: true })
   persistJobSnapshot()
 }
 
@@ -1256,6 +1309,7 @@ onMounted(async () => {
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
   await loadBgmStatus()
+  await syncJobsFromBackend({ activateLatest: true })
   if (jobs.value.length) {
     startPolling()
   }
@@ -1644,8 +1698,14 @@ onUnmounted(() => {
     <section class="card">
       <h2>{{ t('section.jobRecovery') }}</h2>
       <div class="job-restore-row">
-        <el-input v-model="recoverJobIdInput" :placeholder="t('placeholder.recoverJobId')" clearable style="max-width: 360px" />
-        <el-button @click="recoverJobById">{{ t('action.recoverJob') }}</el-button>
+        <el-input
+          v-model="recoverJobIdInput"
+          :placeholder="t('placeholder.recoverJobId')"
+          clearable
+          style="max-width: 360px"
+          @keyup.enter.prevent="recoverJobById"
+        />
+        <el-button native-type="button" @click="recoverJobById">{{ t('action.recoverJob') }}</el-button>
       </div>
     </section>
 

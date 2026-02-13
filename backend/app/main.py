@@ -501,6 +501,12 @@ async def resume_video_job(request: Request, job_id: str) -> dict:
     return {"status": code, "job_id": job_id}
 
 
+@app.get("/api/jobs")
+async def list_jobs(limit: int = 100) -> dict:
+    statuses = job_store.list_recent(limit=limit)
+    return {"jobs": [item.model_dump() for item in statuses]}
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str) -> dict:
     status = _resolve_job_status(job_id)

@@ -109,6 +109,10 @@ export const api = {
   resumeJob(jobId) {
     return jsonRequest(`/api/jobs/${jobId}/resume`, 'POST')
   },
+  listJobs(limit = 100) {
+    const safeLimit = Math.max(1, Math.min(Number(limit || 100), 500))
+    return request(`/api/jobs?limit=${safeLimit}&_ts=${Date.now()}`, { cache: 'no-store' })
+  },
   getJob(jobId) {
     return request(`/api/jobs/${jobId}?_ts=${Date.now()}`, { cache: 'no-store' })
   },
