@@ -11,6 +11,8 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - Character reference-image library (select/upload/generate)
 - Per-character TTS voice selection from real voice list
 - Scene-image reuse cache with LLM text matching (cost reduction)
+- SQLite-persisted job states with restart recovery
+- Interrupted jobs auto-resume from generated clip checkpoints
 
 ## Workflow (Current)
 
@@ -36,6 +38,27 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 ## Backend
 
 ### Start
+
+Local run prerequisite: install `ffmpeg` first (Docker image already includes it).
+
+Example install commands:
+
+```bash
+# Windows (winget)
+winget install Gyan.FFmpeg
+
+# macOS (Homebrew)
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt-get update && sudo apt-get install -y ffmpeg
+```
+
+After install, verify:
+
+```bash
+ffmpeg -version
+```
 
 ```bash
 cd backend
@@ -94,6 +117,8 @@ Important paths:
 - `SCENE_CACHE_DIR`: generated scene-image cache files
 - `SCENE_CACHE_INDEX_PATH`: metadata index for scene-image reuse
 - `SCENE_CACHE_DB_PATH`: sqlite storage for scene cache (reference-image bindings)
+- `JOBS_DB_PATH`: sqlite storage for job status + payload (resume support)
+- `JOB_CLIP_PREVIEW_LIMIT`: max clip preview URLs returned per job status
 - `LOG_DIR`: backend log files
 
 Request field (generate video):

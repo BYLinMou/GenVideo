@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import json
 import logging
 import re
@@ -10,7 +11,7 @@ import tempfile
 import random
 from pathlib import Path
 from collections import deque
-from threading import Thread
+from threading import Lock, Thread
 from uuid import uuid4
 
 from fastapi.concurrency import run_in_threadpool
@@ -38,6 +39,9 @@ from .tts_service import get_audio_duration, synthesize_tts
 
 
 logger = logging.getLogger(__name__)
+
+_RUNNER_LOCK = Lock()
+_ACTIVE_RUNNERS: set[str] = set()
 
 _SUBTITLE_FONT_RESOLVED = False
 _SUBTITLE_FONT_PATH: str | None = None
@@ -942,34 +946,46 @@ def _render_clip_sync(
 ) -> None:
     profile = _resolve_render_profile(render_mode)
     clip_fps = int(profile.get("clip_fps") or fps)
-    image_clip = _build_motion_image_clip(
-        image_path=image_path,
-        duration=duration,
-        resolution=resolution,
-        motion=camera_motion,
-    )
-    audio_clip = AudioFileClip(audio_path).with_volume_scaled(_TTS_GAIN)
-    base = image_clip.with_audio(audio_clip)
-    subtitle_clips = _subtitle_clips(text, duration, resolution, subtitle_style)
-    composed = CompositeVideoClip([base, *subtitle_clips], size=resolution).with_duration(duration)
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    composed.write_videofile(
-        str(output_path),
-        fps=clip_fps,
-        audio_codec="aac",
-        codec="libx264",
-        preset=str(profile.get("clip_preset") or "veryfast"),
-        ffmpeg_params=["-crf", str(profile.get("clip_crf") or "27"), "-movflags", "+faststart", "-b:a", _VIDEO_AUDIO_BITRATE],
-        logger=None,
-    )
+    image_clip: ImageClip | None = None
+    audio_clip: AudioFileClip | None = None
+    base: ImageClip | CompositeVideoClip | None = None
+    subtitle_clips: list[TextClip] = []
+    composed: CompositeVideoClip | None = None
 
-    composed.close()
-    for subtitle in subtitle_clips:
-        subtitle.close()
-    base.close()
-    audio_clip.close()
-    image_clip.close()
+    try:
+        image_clip = _build_motion_image_clip(
+            image_path=image_path,
+            duration=duration,
+            resolution=resolution,
+            motion=camera_motion,
+        )
+        audio_clip = AudioFileClip(audio_path).with_volume_scaled(_TTS_GAIN)
+        base = image_clip.with_audio(audio_clip)
+        subtitle_clips = _subtitle_clips(text, duration, resolution, subtitle_style)
+        composed = CompositeVideoClip([base, *subtitle_clips], size=resolution).with_duration(duration)
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        composed.write_videofile(
+            str(output_path),
+            fps=clip_fps,
+            audio_codec="aac",
+            codec="libx264",
+            preset=str(profile.get("clip_preset") or "veryfast"),
+            ffmpeg_params=["-crf", str(profile.get("clip_crf") or "27"), "-movflags", "+faststart", "-b:a", _VIDEO_AUDIO_BITRATE],
+            logger=None,
+        )
+    finally:
+        if composed is not None:
+            composed.close()
+        for subtitle in subtitle_clips:
+            subtitle.close()
+        if base is not None:
+            base.close()
+        if audio_clip is not None:
+            audio_clip.close()
+        if image_clip is not None:
+            image_clip.close()
 
 
 def _render_final_sync(
@@ -1266,6 +1282,37 @@ async def _segment_text(payload: GenerateVideoRequest) -> tuple[list[str], int]:
     return plan.segments, plan.total_sentences
 
 
+def _cleanup_segment_artifacts(temp_root: Path, segment_index: int) -> None:
+    stem = f"segment_{segment_index:04d}"
+    for suffix in (".png", ".mp3", ".wav"):
+        target = temp_root / f"{stem}{suffix}"
+        try:
+            if target.exists():
+                target.unlink()
+        except Exception:
+            logger.debug("Failed to cleanup artifact: %s", target)
+
+
+def _is_valid_media_file(path: Path, min_bytes: int = 4096) -> bool:
+    if not path.exists() or not path.is_file():
+        return False
+
+
+def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> list[str]:
+    clip_paths: list[str] = []
+    total = max(0, int(total_segments or 0))
+    for index in range(total):
+        clip_path = clip_root / f"clip_{index:04d}.mp4"
+        if not _is_valid_media_file(clip_path):
+            raise FileNotFoundError(f"Missing segment clip for compose: {clip_path}")
+        clip_paths.append(str(clip_path))
+    return clip_paths
+    try:
+        return int(path.stat().st_size) >= int(min_bytes)
+    except Exception:
+        return False
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1276,11 +1323,9 @@ def _update_job(
     current_segment: int = 0,
     total_segments: int = 0,
     output_video_path: str | None = None,
-    clip_paths: list[str] | None = None,
+    clip_count: int | None = None,
 ) -> None:
-    previews: list[str] = []
-    if clip_paths:
-        previews = [f"/api/jobs/{job_id}/clips/{index}" for index, _ in enumerate(clip_paths)]
+    resolved_clip_count = max(0, int(clip_count or 0))
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1292,8 +1337,8 @@ def _update_job(
             total_segments=max(0, int(total_segments or 0)),
             output_video_url=f"/api/jobs/{job_id}/video" if output_video_path else None,
             output_video_path=output_video_path,
-            clip_count=len(clip_paths or []),
-            clip_preview_urls=previews,
+            clip_count=resolved_clip_count,
+            clip_preview_urls=[],
         )
     )
 
@@ -1428,6 +1473,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
     temp_root = project_path(settings.temp_dir) / job_id
     clip_root = temp_root / "clips"
     clip_root.mkdir(parents=True, exist_ok=True)
+    rendered_clip_count = 0
+    total = 0
 
     if payload.enable_scene_image_reuse:
         ensure_scene_cache_paths()
@@ -1442,7 +1489,6 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         resolution = _parse_resolution(payload.resolution)
         characters = _sanitize_character_voices(list(payload.characters), narrator_voice=_NARRATOR_VOICE_ID)
-        clip_paths: list[str] = []
         total = len(segments)
         no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
         lookback_scenes = no_repeat_window
@@ -1459,7 +1505,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     "Job cancelled",
                     current_segment=index,
                     total_segments=total,
-                    clip_paths=clip_paths,
+                    clip_count=rendered_clip_count,
                 )
                 return
 
@@ -1476,7 +1522,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 f"Rendering scene {index + 1}/{total} (sentences: {sentence_count or '-'})",
                 current_segment=index + 1,
                 total_segments=total,
-                clip_paths=clip_paths,
+                clip_count=rendered_clip_count,
             )
 
             character = _pick_character(characters, segment_text)
@@ -1486,6 +1532,24 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
             clip_path = clip_root / f"clip_{index:04d}.mp4"
+
+            if _is_valid_media_file(clip_path):
+                rendered_clip_count += 1
+                completed_ratio = (index + 1) / max(total, 1)
+                _update_job(
+                    job_id,
+                    base_url,
+                    "running",
+                    stage_start + completed_ratio * stage_span,
+                    "render-segment",
+                    f"Scene {index + 1}/{total} resumed from checkpoint",
+                    current_segment=index + 1,
+                    total_segments=total,
+                    clip_count=rendered_clip_count,
+                )
+                _cleanup_segment_artifacts(temp_root, index)
+                gc.collect()
+                continue
 
             prompt_task = asyncio.create_task(
                 build_segment_image_bundle(
@@ -1544,7 +1608,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 payload.camera_motion,
                 payload.render_mode,
             )
-            clip_paths.append(str(clip_path))
+            rendered_clip_count += 1
+            _cleanup_segment_artifacts(temp_root, index)
+            gc.collect()
             completed_ratio = (index + 1) / max(total, 1)
             _update_job(
                 job_id,
@@ -1555,7 +1621,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 f"Scene {index + 1}/{total} rendered",
                 current_segment=index + 1,
                 total_segments=total,
-                clip_paths=clip_paths,
+                clip_count=rendered_clip_count,
             )
 
         if job_store.is_cancelled(job_id):
@@ -1568,7 +1634,26 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "Job cancelled",
                 current_segment=total,
                 total_segments=total,
-                clip_paths=clip_paths,
+                clip_count=rendered_clip_count,
+            )
+            return
+
+        output_root = project_path(settings.output_dir)
+        output_root.mkdir(parents=True, exist_ok=True)
+        final_path = output_root / f"{job_id}.mp4"
+
+        if _is_valid_media_file(final_path, min_bytes=16384):
+            _update_job(
+                job_id,
+                base_url,
+                "completed",
+                1.0,
+                "done",
+                "Video already exists, job recovered",
+                current_segment=total,
+                total_segments=total,
+                output_video_path=str(final_path),
+                clip_count=rendered_clip_count,
             )
             return
 
@@ -1581,14 +1666,14 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             f"Composing final video ({total}/{total} scenes ready)",
             current_segment=total,
             total_segments=total,
-            clip_paths=clip_paths,
+            clip_count=rendered_clip_count,
         )
-        output_root = project_path(settings.output_dir)
-        output_root.mkdir(parents=True, exist_ok=True)
-        final_path = output_root / f"{job_id}.mp4"
+
+        clip_paths_for_compose = _collect_clip_paths_for_compose(clip_root=clip_root, total_segments=total)
+
         await run_in_threadpool(
             _render_final_sync,
-            clip_paths,
+            clip_paths_for_compose,
             final_path,
             payload.fps,
             payload.bgm_enabled,
@@ -1612,7 +1697,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "Job cancelled during compose stage",
                 current_segment=total,
                 total_segments=total,
-                clip_paths=clip_paths,
+                clip_count=rendered_clip_count,
             )
             return
 
@@ -1626,18 +1711,29 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             current_segment=total,
             total_segments=total,
             output_video_path=str(final_path),
-            clip_paths=clip_paths,
+            clip_count=rendered_clip_count,
         )
     except Exception as exc:
         logger.exception("Video job failed: %s", job_id)
-        _update_job(job_id, base_url, "failed", 1.0, "error", f"Video generation failed: {exc}")
+        _update_job(
+            job_id,
+            base_url,
+            "failed",
+            1.0,
+            "error",
+            f"Video generation failed: {exc}",
+            clip_count=rendered_clip_count,
+        )
     finally:
         job_store.clear_cancel(job_id)
+        gc.collect()
 
 
-def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
-    job_id = uuid4().hex
-    _update_job(job_id, base_url, "queued", 0.0, "queued", "Job queued")
+def _start_job_runner(job_id: str, payload: GenerateVideoRequest, base_url: str) -> bool:
+    with _RUNNER_LOCK:
+        if job_id in _ACTIVE_RUNNERS:
+            return False
+        _ACTIVE_RUNNERS.add(job_id)
 
     def runner() -> None:
         try:
@@ -1645,10 +1741,51 @@ def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
         except Exception as exc:
             logger.exception("Job runner crashed before async job handler completed: %s", job_id)
             _update_job(job_id, base_url, "failed", 1.0, "error", f"Video generation failed: {exc}")
+        finally:
+            with _RUNNER_LOCK:
+                _ACTIVE_RUNNERS.discard(job_id)
 
     thread = Thread(target=runner, daemon=True)
     thread.start()
+    return True
+
+
+def create_job(payload: GenerateVideoRequest, base_url: str) -> str:
+    job_id = uuid4().hex
+    job_store.save_payload(job_id, payload, base_url)
+    _update_job(job_id, base_url, "queued", 0.0, "queued", "Job queued")
+    _start_job_runner(job_id=job_id, payload=payload, base_url=base_url)
     return job_id
+
+
+def resume_interrupted_jobs() -> list[str]:
+    resumed: list[str] = []
+    for job_id in job_store.list_incomplete_job_ids():
+        loaded = job_store.load_payload(job_id)
+        if not loaded:
+            _update_job(job_id, "", "failed", 1.0, "error", "Job payload missing, cannot resume")
+            continue
+
+        payload, stored_base_url = loaded
+        current = job_store.get(job_id)
+        if current and current.status == "running":
+            _update_job(
+                job_id,
+                stored_base_url,
+                "queued",
+                max(0.0, min(float(current.progress or 0.0), 0.95)),
+                "resume",
+                "Detected interrupted job, resuming from checkpoint",
+                current_segment=current.current_segment,
+                total_segments=current.total_segments,
+                output_video_path=current.output_video_path,
+                clip_count=current.clip_count,
+            )
+
+        started = _start_job_runner(job_id=job_id, payload=payload, base_url=stored_base_url)
+        if started:
+            resumed.append(job_id)
+    return resumed
 
 
 def cancel_job(job_id: str, base_url: str) -> bool:

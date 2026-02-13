@@ -1621,12 +1621,15 @@ onUnmounted(() => {
     </section>
 
     <section class="card">
-      <h2>{{ t('section.render') }}</h2>
+      <h2>任务恢复</h2>
       <div class="job-restore-row">
         <el-input v-model="recoverJobIdInput" placeholder="输入任务ID后恢复进度" clearable style="max-width: 360px" />
         <el-button @click="recoverJobById">恢复任务</el-button>
       </div>
+    </section>
 
+    <section class="card">
+      <h2>{{ t('section.render') }}</h2>
       <div v-if="sortedJobs.length" class="job-list">
         <div
           v-for="item in sortedJobs"
