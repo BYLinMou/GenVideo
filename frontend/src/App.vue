@@ -36,7 +36,7 @@ const form = reactive({
   fps: 30,
   render_mode: 'balanced',
   bgm_enabled: true,
-  bgm_volume: 0.08,
+  bgm_volume: 0.07,
   novel_alias: '',
   watermark_enabled: true,
   watermark_type: 'text',

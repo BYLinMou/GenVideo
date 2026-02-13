@@ -104,7 +104,7 @@ class GenerateVideoRequest(BaseModel):
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.07, ge=0.0, le=1.0)
     novel_alias: str | None = None
     watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
@@ -124,7 +124,7 @@ class GenerateVideoResponse(BaseModel):
 
 class RemixBgmRequest(BaseModel):
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.07, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
     novel_alias: str | None = None
     watermark_enabled: bool = True

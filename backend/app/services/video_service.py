@@ -48,7 +48,7 @@ _SUBTITLE_FONT_PATH: str | None = None
 
 _VIDEO_AUDIO_BITRATE = "96k"
 _TTS_GAIN = 1.15
-_FINAL_AUDIO_GAIN = 4.0
+_FINAL_AUDIO_GAIN = 5.0
 _NARRATOR_VOICE_ID = "zh-CN-YunxiNeural"
 _OVERLAY_FONT_SIZE = 58
 _WATERMARK_TRAVEL_SECONDS = 22.0
@@ -123,7 +123,7 @@ def _compose_overlay_filter(
 
     alias_value = (novel_alias or "").strip()
     if alias_value:
-        alias_font_size = max(54, int(_OVERLAY_FONT_SIZE) - 2)
+        alias_font_size = max(54, int(_OVERLAY_FONT_SIZE) - 3)
         alias_line_h = int(alias_font_size * 1.5)
         alias_font = _ffmpeg_escape_text(str(subtitle_font or "C:/Windows/Fonts/msyh.ttc"))
         alias_text = _ffmpeg_escape_text(alias_value)
@@ -284,7 +284,7 @@ def _build_moviepy_overlay_clips(
         title_clip = TextClip(
             text=alias_value,
             font=overlay_font if overlay_font else None,
-            font_size=max(54, int(_OVERLAY_FONT_SIZE) - 2),
+            font_size=max(54, int(_OVERLAY_FONT_SIZE) - 3),
             color="#FFFFFF",
             stroke_color="#111111",
             stroke_width=2,
