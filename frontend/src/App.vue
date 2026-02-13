@@ -718,20 +718,23 @@ function normalizeRuntimeUrl(raw) {
   }
 }
 
-function resolvePageFromHash() {
+function resolvePageFromPath() {
   if (typeof window === 'undefined') return PAGE_WORKSPACE
-  const hash = String(window.location.hash || '').trim().toLowerCase()
-  if (hash === '#/final-videos' || hash === '#final-videos') {
+  const pathname = String(window.location.pathname || '/').trim().toLowerCase()
+  if (pathname === '/final-videos') {
     return PAGE_FINAL_VIDEOS
   }
   return PAGE_WORKSPACE
 }
 
-function setPageHash(page) {
+function setPagePath(page, options = {}) {
   if (typeof window === 'undefined') return
-  const target = page === PAGE_FINAL_VIDEOS ? '#/final-videos' : '#/workspace'
-  if (window.location.hash !== target) {
-    window.location.hash = target
+  const { replace = false } = options
+  const target = page === PAGE_FINAL_VIDEOS ? '/final-videos' : '/workspace'
+  const current = String(window.location.pathname || '/').trim()
+  if (current !== target) {
+    const method = replace ? 'replaceState' : 'pushState'
+    window.history[method]({}, '', target)
   }
 }
 
@@ -771,14 +774,14 @@ function formatDateTime(value) {
 async function switchPage(page) {
   const next = page === PAGE_FINAL_VIDEOS ? PAGE_FINAL_VIDEOS : PAGE_WORKSPACE
   activePage.value = next
-  setPageHash(next)
+  setPagePath(next)
   if (next === PAGE_FINAL_VIDEOS && !finalVideos.value.length) {
     await loadFinalVideos()
   }
 }
 
-async function handleHashChange() {
-  const next = resolvePageFromHash()
+async function handleLocationChange() {
+  const next = resolvePageFromPath()
   activePage.value = next
   if (next === PAGE_FINAL_VIDEOS) {
     await loadFinalVideos({ silent: true })
@@ -1582,11 +1585,9 @@ async function removeJob(jobId) {
 
 onMounted(async () => {
   if (typeof window !== 'undefined') {
-    activePage.value = resolvePageFromHash()
-    if (!String(window.location.hash || '').trim()) {
-      setPageHash(activePage.value)
-    }
-    window.addEventListener('hashchange', handleHashChange)
+    activePage.value = resolvePageFromPath()
+    setPagePath(activePage.value, { replace: true })
+    window.addEventListener('popstate', handleLocationChange)
   }
   restoreJobSnapshot()
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
@@ -1604,7 +1605,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopPolling()
   if (typeof window !== 'undefined') {
-    window.removeEventListener('hashchange', handleHashChange)
+    window.removeEventListener('popstate', handleLocationChange)
   }
 })
 </script>

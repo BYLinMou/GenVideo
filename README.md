@@ -110,10 +110,10 @@ npm run dev
 
 Default: `http://localhost:5173`
 
-Page paths (hash mode in current frontend):
+Page paths (history mode):
 
-- Workspace: `#/workspace`
-- Final videos library: `#/final-videos`
+- Workspace: `/workspace`
+- Final videos library: `/final-videos`
 
 Final videos library behavior:
 
