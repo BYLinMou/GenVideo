@@ -232,6 +232,8 @@ const bgmPicker = reactive({
   visible: false
 })
 
+const SEGMENT_REDUCE_ALERT_THRESHOLD = 120
+
 const generatingRef = reactive({})
 const characterKeyMap = new WeakMap()
 let characterKeySeq = 0
@@ -1047,8 +1049,32 @@ async function runGenerate() {
 
   const segmentRangeCheck = parseSegmentGroupsRange(form.segment_groups_range)
   if (!segmentRangeCheck.valid) {
-    ElMessage.warning('段数范围格式不正确，请使用 1-80,81-90 / 60（1-60）/ 0 或 -1（全部）')
+    ElMessage.warning(t('toast.segmentRangeInvalid'))
     return
+  }
+
+  const effectiveSegments = Math.max(0, Number(effectiveSegmentGroups.value || 0))
+  if (effectiveSegments > SEGMENT_REDUCE_ALERT_THRESHOLD) {
+    try {
+      await ElMessageBox.confirm(
+        t('dialog.tooManySegmentsMessage', {
+          count: effectiveSegments,
+          limit: SEGMENT_REDUCE_ALERT_THRESHOLD
+        }),
+        t('dialog.tipTitle'),
+        {
+          confirmButtonText: t('dialog.tooManySegmentsContinue'),
+          cancelButtonText: t('dialog.tooManySegmentsReduce'),
+          type: 'warning',
+          distinguishCancelAndClose: true
+        }
+      )
+    } catch (action) {
+      if (action === 'cancel') {
+        return
+      }
+      return
+    }
   }
 
   if (!String(form.novel_alias || '').trim()) {
@@ -1508,10 +1534,10 @@ onUnmounted(() => {
         </div>
 
         <div>
-          <label>{{ t('field.maxSegmentGroups') }}（1开始，可写 1-80,81-90；单写 60=1-60；0/-1=全部）</label>
+          <label>{{ t('field.maxSegmentGroups') }}（{{ t('field.segmentGroupsRangeHelp') }}）</label>
           <el-input
             v-model="form.segment_groups_range"
-            placeholder="例如：1-80,81-90 / 60 / 0（全部）"
+            :placeholder="t('placeholder.segmentGroupsRange')"
             clearable
           />
         </div>
