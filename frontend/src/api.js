@@ -122,6 +122,9 @@ export const api = {
   getClipUrl(jobId, clipIndex) {
     return buildApiUrl(`/api/jobs/${jobId}/clips/${clipIndex}`)
   },
+  getClipThumbnailUrl(jobId, clipIndex) {
+    return buildApiUrl(`/api/jobs/${jobId}/clips/${clipIndex}/thumb`)
+  },
   listCharacterRefImages() {
     return request('/api/character-reference-images')
   },

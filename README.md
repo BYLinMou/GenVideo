@@ -90,8 +90,10 @@ Default: `http://localhost:8000`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
 - `POST /api/jobs/{job_id}/resume` (continue cancelled/failed/interrupted job from checkpoint)
+- `GET /api/jobs?limit=100` (list recent jobs from SQLite, used by frontend recovery/sync)
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
+- `GET /api/jobs/{job_id}/clips/{clip_index}/thumb` (on-demand cached clip thumbnail, JPG)
 - `GET /api/jobs/{job_id}/video`
 
 ## Frontend

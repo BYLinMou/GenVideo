@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import quote
 from uuid import uuid4
@@ -176,6 +177,54 @@ def _resolve_job_status(job_id: str) -> JobStatus | None:
     if status:
         return status
     return recovered
+
+
+def _job_clip_path(job_id: str, clip_index: int) -> Path:
+    return project_path(settings.temp_dir) / job_id / "clips" / f"clip_{clip_index:04d}.mp4"
+
+
+def _job_clip_thumb_path(job_id: str, clip_index: int) -> Path:
+    return project_path(settings.temp_dir) / job_id / "thumbs" / f"clip_{clip_index:04d}.jpg"
+
+
+def _ensure_job_clip_thumbnail(job_id: str, clip_index: int) -> Path:
+    clip_path = _job_clip_path(job_id, clip_index)
+    if not clip_path.exists() or not clip_path.is_file():
+        raise FileNotFoundError("clip not found")
+
+    thumb_path = _job_clip_thumb_path(job_id, clip_index)
+    if thumb_path.exists():
+        try:
+            if thumb_path.stat().st_size >= 512 and thumb_path.stat().st_mtime >= clip_path.stat().st_mtime:
+                return thumb_path
+        except Exception:
+            pass
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise RuntimeError("ffmpeg not found")
+
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(clip_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "4",
+            str(thumb_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if proc.returncode != 0 or not thumb_path.exists():
+        raise RuntimeError((proc.stderr or "ffmpeg thumbnail failed")[:300])
+
+    return thumb_path
 
 
 @app.on_event("startup")
@@ -532,7 +581,20 @@ async def get_job_video(job_id: str):
 async def get_job_clip(job_id: str, clip_index: int):
     if clip_index < 0:
         raise HTTPException(status_code=400, detail="clip_index must be >= 0")
-    clip_path = project_path(settings.temp_dir) / job_id / "clips" / f"clip_{clip_index:04d}.mp4"
+    clip_path = _job_clip_path(job_id, clip_index)
     if not clip_path.exists():
         raise HTTPException(status_code=404, detail="clip not found")
     return FileResponse(clip_path, media_type="video/mp4", filename=clip_path.name)
+
+
+@app.get("/api/jobs/{job_id}/clips/{clip_index}/thumb")
+async def get_job_clip_thumbnail(job_id: str, clip_index: int):
+    if clip_index < 0:
+        raise HTTPException(status_code=400, detail="clip_index must be >= 0")
+    try:
+        thumb_path = await run_in_threadpool(_ensure_job_clip_thumbnail, job_id, clip_index)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="clip not found")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return FileResponse(thumb_path, media_type="image/jpeg", filename=thumb_path.name)

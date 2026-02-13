@@ -109,6 +109,7 @@ const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
+const clipVideoEnabled = reactive({})
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -523,6 +524,23 @@ function syncJobViewFromRecord(record) {
   job.totalSegments = Number(record.totalSegments || 0)
   job.videoUrl = normalizeRuntimeUrl(record.videoUrl || '')
   job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
+}
+
+function clipVideoKey(index) {
+  return `${String(job.id || '')}:${Number(index)}`
+}
+
+function isClipVideoEnabled(index) {
+  return !!clipVideoEnabled[clipVideoKey(index)]
+}
+
+function enableClipVideo(index) {
+  clipVideoEnabled[clipVideoKey(index)] = true
+}
+
+function getClipThumbnailUrl(index) {
+  if (!job.id) return ''
+  return api.getClipThumbnailUrl(job.id, Number(index))
 }
 
 function normalizeRuntimeUrl(raw) {
@@ -1752,9 +1770,27 @@ onUnmounted(() => {
       </div>
 
       <div v-if="job.clipPreviewUrls.length" class="clip-grid">
-        <div v-for="(url, index) in job.clipPreviewUrls" :key="index" class="clip-item">
+        <div v-for="(url, index) in job.clipPreviewUrls" :key="`${job.id}-${index}`" class="clip-item">
           <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
-          <video :src="url" controls preload="metadata" class="video" />
+          <div
+            v-if="!isClipVideoEnabled(index)"
+            class="clip-thumb-wrap"
+            role="button"
+            tabindex="0"
+            @click="enableClipVideo(index)"
+            @keydown.enter.prevent="enableClipVideo(index)"
+          >
+            <img :src="getClipThumbnailUrl(index)" class="video clip-thumb" loading="lazy" alt="clip thumbnail" />
+            <div class="clip-thumb-play">▶</div>
+          </div>
+          <video
+            v-else
+            :src="url"
+            :poster="getClipThumbnailUrl(index)"
+            controls
+            preload="none"
+            class="video"
+          />
         </div>
       </div>
 
