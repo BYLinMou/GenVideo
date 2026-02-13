@@ -1309,6 +1309,39 @@ def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> lis
         return False
 
 
+def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, object] | None:
+    normalized = {str(key): max(0, int(value or 0)) for key, value in (source_counts or {}).items()}
+    total_images = sum(normalized.values())
+    if total_images <= 0:
+        return None
+
+    cache_images = (
+        normalized.get("cache", 0)
+        + normalized.get("fallback_llm", 0)
+        + normalized.get("fallback_cache", 0)
+        + normalized.get("fallback_random_cache", 0)
+    )
+    generated_images = normalized.get("generated", 0)
+    reference_images = normalized.get("fallback_reference", 0)
+    other_images = max(0, total_images - cache_images - generated_images - reference_images)
+
+    def _ratio(value: int) -> float:
+        return round(float(value) / float(total_images), 4) if total_images > 0 else 0.0
+
+    return {
+        "total_images": total_images,
+        "cache_images": cache_images,
+        "generated_images": generated_images,
+        "reference_images": reference_images,
+        "other_images": other_images,
+        "cache_ratio": _ratio(cache_images),
+        "generate_ratio": _ratio(generated_images),
+        "reference_ratio": _ratio(reference_images),
+        "other_ratio": _ratio(other_images),
+        "source_counts": normalized,
+    }
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1320,6 +1353,7 @@ def _update_job(
     total_segments: int = 0,
     output_video_path: str | None = None,
     clip_count: int | None = None,
+    image_source_report: dict[str, object] | None = None,
 ) -> None:
     resolved_clip_count = max(0, int(clip_count or 0))
     job_store.set(
@@ -1335,6 +1369,7 @@ def _update_job(
             output_video_path=output_video_path,
             clip_count=resolved_clip_count,
             clip_preview_urls=[],
+            image_source_report=image_source_report,
         )
     )
 
@@ -1471,6 +1506,15 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
     clip_root.mkdir(parents=True, exist_ok=True)
     rendered_clip_count = 0
     total = 0
+    image_source_counts: dict[str, int] = {
+        "cache": 0,
+        "generated": 0,
+        "fallback_llm": 0,
+        "fallback_cache": 0,
+        "fallback_reference": 0,
+        "fallback_random_cache": 0,
+        "other": 0,
+    }
 
     if payload.enable_scene_image_reuse:
         ensure_scene_cache_paths()
@@ -1592,6 +1636,16 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
             image_bundle, audio_bundle = await asyncio.gather(image_task, audio_task)
             image_result, image_source, reused_entry_id = image_bundle
+            source_key_map = {
+                "cache": "cache",
+                "generated": "generated",
+                "fallback-llm": "fallback_llm",
+                "fallback-cache": "fallback_cache",
+                "fallback-reference": "fallback_reference",
+                "fallback-random-cache": "fallback_random_cache",
+            }
+            source_key = source_key_map.get(str(image_source or ""), "other")
+            image_source_counts[source_key] = int(image_source_counts.get(source_key, 0) or 0) + 1
 
             if lookback_scenes > 0 and reused_entry_id:
                 recent_scene_entry_ids.append(str(reused_entry_id))
@@ -1639,6 +1693,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
+                image_source_report=_build_image_source_report(image_source_counts),
             )
             return
 
@@ -1666,6 +1721,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 total_segments=total,
                 output_video_path=str(final_path),
                 clip_count=rendered_clip_count,
+                image_source_report=_build_image_source_report(image_source_counts),
             )
             return
 
@@ -1710,6 +1766,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
+                image_source_report=_build_image_source_report(image_source_counts),
             )
             return
 
@@ -1724,6 +1781,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             total_segments=total,
             output_video_path=str(final_path),
             clip_count=rendered_clip_count,
+            image_source_report=_build_image_source_report(image_source_counts),
         )
     except Exception as exc:
         logger.exception("Video job failed: %s", job_id)
@@ -1735,6 +1793,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             "error",
             f"Video generation failed: {exc}",
             clip_count=rendered_clip_count,
+            image_source_report=_build_image_source_report(image_source_counts),
         )
     finally:
         job_store.clear_cancel(job_id)

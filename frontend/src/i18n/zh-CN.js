@@ -238,4 +238,9 @@ Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
   tooManySegmentsReduce: '先去减少段数'
 })
 
+Object.assign(zhCN.hint, {
+  imageSourceReportSummary: '生图来源统计：缓存 {cache}/{total}（{cacheRatio}）｜新生成 {generated}/{total}（{generatedRatio}）',
+  imageSourceReportOther: '其他来源 {other}/{total}（{otherRatio}）'
+})
+
 export default zhCN

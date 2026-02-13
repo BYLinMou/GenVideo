@@ -69,7 +69,8 @@ const job = reactive({
   currentSegment: 0,
   totalSegments: 0,
   videoUrl: '',
-  clipPreviewUrls: []
+  clipPreviewUrls: [],
+  imageSourceReport: null
 })
 
 const uiProgressPercent = computed(() => {
@@ -90,6 +91,17 @@ const sceneProgressText = computed(() => {
   const current = Math.max(0, Number(job.currentSegment || 0))
   if (!total) return t('hint.sceneNotStarted')
   return t('hint.sceneProgress', { current: Math.min(current, total), total })
+})
+
+const imageSourceSummary = computed(() => {
+  const report = normalizeImageSourceReport(job.imageSourceReport)
+  if (!report || report.total_images <= 0) return null
+  return {
+    ...report,
+    cacheRatioText: formatRatioPercent(report.cache_ratio),
+    generatedRatioText: formatRatioPercent(report.generate_ratio),
+    otherRatioText: formatRatioPercent(report.other_ratio)
+  }
 })
 
 const bgmStatus = reactive({
@@ -546,6 +558,7 @@ function resetJob() {
   job.totalSegments = 0
   job.videoUrl = ''
   job.clipPreviewUrls = []
+  job.imageSourceReport = null
 }
 
 function createLocalJobRecord(jobId) {
@@ -559,9 +572,40 @@ function createLocalJobRecord(jobId) {
     totalSegments: 0,
     videoUrl: '',
     clipPreviewUrls: [],
+    imageSourceReport: null,
     updatedAt: Date.now(),
     createdAt: Date.now()
   }
+}
+
+function normalizeImageSourceReport(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const toInt = (value) => Math.max(0, Number.parseInt(value, 10) || 0)
+  const toRatio = (value) => {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return 0
+    return Math.max(0, Math.min(1, num))
+  }
+  const total = toInt(raw.total_images)
+  if (!total) return null
+  return {
+    total_images: total,
+    cache_images: toInt(raw.cache_images),
+    generated_images: toInt(raw.generated_images),
+    reference_images: toInt(raw.reference_images),
+    other_images: toInt(raw.other_images),
+    cache_ratio: toRatio(raw.cache_ratio),
+    generate_ratio: toRatio(raw.generate_ratio),
+    reference_ratio: toRatio(raw.reference_ratio),
+    other_ratio: toRatio(raw.other_ratio)
+  }
+}
+
+function formatRatioPercent(value) {
+  const ratio = Number(value)
+  if (!Number.isFinite(ratio)) return '0.0%'
+  const safe = Math.max(0, Math.min(1, ratio))
+  return `${(safe * 100).toFixed(1)}%`
 }
 
 function upsertJobRecord(record) {
@@ -613,6 +657,7 @@ function syncJobViewFromRecord(record) {
   job.totalSegments = Number(record.totalSegments || 0)
   job.videoUrl = normalizeRuntimeUrl(record.videoUrl || '')
   job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
+  job.imageSourceReport = normalizeImageSourceReport(record.imageSourceReport)
 }
 
 function resetClipVideoEnabledForJob(jobId) {
@@ -690,6 +735,7 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
     clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
+    imageSourceReport: normalizeImageSourceReport(status.image_source_report),
     videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
     updatedAt: Date.now()
   }
@@ -760,6 +806,7 @@ function persistJobSnapshot() {
       totalSegments: Number(item.totalSegments || 0),
       videoUrl: item.videoUrl || '',
       clipPreviewUrls: item.clipPreviewUrls || [],
+      imageSourceReport: normalizeImageSourceReport(item.imageSourceReport),
       updatedAt: Number(item.updatedAt || Date.now()),
       createdAt: Number(item.createdAt || Date.now())
     }))
@@ -785,6 +832,7 @@ function restoreJobSnapshot() {
         totalSegments: Number(item.totalSegments || 0),
         videoUrl: item.videoUrl || '',
         clipPreviewUrls: Array.isArray(item.clipPreviewUrls) ? item.clipPreviewUrls : [],
+        imageSourceReport: normalizeImageSourceReport(item.imageSourceReport),
         updatedAt: Number(item.updatedAt || Date.now()),
         createdAt: Number(item.createdAt || Date.now())
       }))
@@ -1933,6 +1981,22 @@ onUnmounted(() => {
 
       <div v-if="job.videoUrl" class="preview">
         <h3>{{ t('hint.finalVideo') }}</h3>
+        <p v-if="imageSourceSummary" class="muted">
+          {{ t('hint.imageSourceReportSummary', {
+            cache: imageSourceSummary.cache_images,
+            generated: imageSourceSummary.generated_images,
+            total: imageSourceSummary.total_images,
+            cacheRatio: imageSourceSummary.cacheRatioText,
+            generatedRatio: imageSourceSummary.generatedRatioText
+          }) }}
+        </p>
+        <p v-if="imageSourceSummary && imageSourceSummary.other_images > 0" class="muted">
+          {{ t('hint.imageSourceReportOther', {
+            other: imageSourceSummary.other_images,
+            total: imageSourceSummary.total_images,
+            otherRatio: imageSourceSummary.otherRatioText
+          }) }}
+        </p>
         <video :src="job.videoUrl" controls preload="metadata" class="video" />
         <a :href="job.videoUrl" target="_blank" rel="noopener noreferrer">{{ t('action.downloadFinal') }}</a>
       </div>
