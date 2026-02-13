@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 
 from .llm_service import group_sentences, segment_by_fixed, segment_by_smart, split_sentences
@@ -101,3 +102,72 @@ async def build_segment_plan(
     sentences = split_sentences(text)
     segments = group_sentences(sentences, sentences_per_segment)
     return SegmentPlan(segments=segments, total_sentences=len(sentences), request_signature=signature)
+
+
+def select_segments_by_range(segments: list[str], range_spec: str | None) -> list[str]:
+    raw = str(range_spec or "").strip()
+    if not raw:
+        return list(segments)
+
+    normalized = (
+        raw.replace("，", ",")
+        .replace("；", ",")
+        .replace(";", ",")
+        .replace("～", "-")
+        .replace("~", "-")
+        .replace("—", "-")
+        .replace("–", "-")
+        .replace("到", "-")
+    )
+
+    parts = [item.strip() for item in normalized.split(",") if item.strip()]
+    if not parts:
+        return list(segments)
+
+    total = max(0, len(segments))
+    selected: list[str] = []
+    selected_indexes: set[int] = set()
+
+    single_token_mode = len(parts) == 1
+
+    for part in parts:
+        start = 0
+        end = 0
+
+        if single_token_mode and re.fullmatch(r"-?\d+", part):
+            value = int(part)
+            if value <= 0:
+                return list(segments)
+            start = 1
+            end = value
+        elif re.fullmatch(r"\d+", part):
+            if single_token_mode:
+                start = 1
+                end = int(part)
+            else:
+                start = int(part)
+                end = int(part)
+        else:
+            match = re.fullmatch(r"(\d+)\s*-\s*(\d+)", part)
+            if not match:
+                raise ValueError(f"Invalid segment range token: {part}")
+            start = int(match.group(1))
+            end = int(match.group(2))
+
+        if start <= 0 or end <= 0:
+            raise ValueError("Segment range is 1-based; values must be >= 1")
+
+        lo = min(start, end)
+        hi = max(start, end)
+        if lo > total:
+            continue
+
+        for number in range(lo, hi + 1):
+            if number > total:
+                break
+            if number in selected_indexes:
+                continue
+            selected_indexes.add(number)
+            selected.append(segments[number - 1])
+
+    return selected

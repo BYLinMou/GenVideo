@@ -29,6 +29,7 @@ const form = reactive({
   segment_method: 'sentence',
   sentences_per_segment: 5,
   max_segment_groups: 0,
+  segment_groups_range: '',
   resolution: '1920x1080',
   image_aspect_ratio: '',
   subtitle_style: 'white_black',
@@ -121,11 +122,97 @@ const sortedJobs = computed(() => {
 
 const effectiveSegmentGroups = computed(() => {
   if (!segmentPreview.total_segments) return 0
+  const parsed = parseSegmentGroupsRange(form.segment_groups_range, segmentPreview.total_segments)
+  if (parsed.valid && parsed.indexes.length) {
+    return parsed.indexes.length
+  }
   if (form.max_segment_groups > 0) {
     return Math.min(segmentPreview.total_segments, form.max_segment_groups)
   }
   return segmentPreview.total_segments
 })
+
+function parseSegmentGroupsRange(value, totalSegments = 0) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return { valid: true, indexes: [] }
+  }
+
+  const normalized = text
+    .replaceAll('，', ',')
+    .replaceAll('；', ',')
+    .replaceAll(';', ',')
+    .replaceAll('～', '-')
+    .replaceAll('~', '-')
+    .replaceAll('—', '-')
+    .replaceAll('–', '-')
+    .replaceAll('到', '-')
+
+  const parts = normalized
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  if (!parts.length) {
+    return { valid: true, indexes: [] }
+  }
+
+  const indexes = []
+  const seen = new Set()
+  const singleTokenMode = parts.length === 1
+  for (const part of parts) {
+    let start = 0
+    let end = 0
+    if (singleTokenMode && /^-?\d+$/.test(part)) {
+      const value = Number(part)
+      if (!Number.isFinite(value)) {
+        return { valid: false, indexes: [], error: part }
+      }
+      if (value <= 0) {
+        if (totalSegments > 0) {
+          for (let number = 1; number <= totalSegments; number += 1) {
+            if (seen.has(number)) continue
+            seen.add(number)
+            indexes.push(number)
+          }
+        }
+        continue
+      }
+      start = 1
+      end = value
+    } else if (/^\d+$/.test(part)) {
+      if (singleTokenMode) {
+        start = 1
+        end = Number(part)
+      } else {
+        start = Number(part)
+        end = Number(part)
+      }
+    } else {
+      const matched = part.match(/^(\d+)\s*-\s*(\d+)$/)
+      if (!matched) {
+        return { valid: false, indexes: [], error: part }
+      }
+      start = Number(matched[1])
+      end = Number(matched[2])
+    }
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) {
+      return { valid: false, indexes: [], error: part }
+    }
+
+    const lo = Math.min(start, end)
+    const hi = Math.max(start, end)
+    for (let number = lo; number <= hi; number += 1) {
+      if (totalSegments > 0 && number > totalSegments) break
+      if (seen.has(number)) continue
+      seen.add(number)
+      indexes.push(number)
+    }
+  }
+
+  return { valid: true, indexes }
+}
 
 const filteredModels = computed(() => {
   const keyword = modelFilterKeyword.value.trim().toLowerCase()
@@ -958,6 +1045,12 @@ async function runGenerate() {
     return
   }
 
+  const segmentRangeCheck = parseSegmentGroupsRange(form.segment_groups_range)
+  if (!segmentRangeCheck.valid) {
+    ElMessage.warning('段数范围格式不正确，请使用 1-80,81-90 / 60（1-60）/ 0 或 -1（全部）')
+    return
+  }
+
   if (!String(form.novel_alias || '').trim()) {
     try {
       await ElMessageBox.confirm(t('dialog.missingAliasMessage'), t('dialog.tipTitle'), {
@@ -990,6 +1083,7 @@ async function runGenerate() {
         : null,
       sentences_per_segment: form.sentences_per_segment,
       max_segment_groups: form.max_segment_groups,
+      segment_groups_range: String(form.segment_groups_range || '').trim() || null,
       resolution: form.resolution,
       subtitle_style: form.subtitle_style,
       camera_motion: form.camera_motion,
@@ -1414,8 +1508,12 @@ onUnmounted(() => {
         </div>
 
         <div>
-          <label>{{ t('field.maxSegmentGroups') }}（{{ t('field.maxSegmentHelp') }}）</label>
-          <el-input-number v-model="form.max_segment_groups" :min="0" :max="10000" />
+          <label>{{ t('field.maxSegmentGroups') }}（1开始，可写 1-80,81-90；单写 60=1-60；0/-1=全部）</label>
+          <el-input
+            v-model="form.segment_groups_range"
+            placeholder="例如：1-80,81-90 / 60 / 0（全部）"
+            clearable
+          />
         </div>
 
         <div>

@@ -89,7 +89,8 @@ class GenerateVideoRequest(BaseModel):
     segment_request_signature: str | None = None
     precomputed_segments: list[str] | None = None
     sentences_per_segment: int = Field(default=5, ge=1, le=50)
-    max_segment_groups: int = Field(default=0, ge=0, le=10000)
+    max_segment_groups: int = Field(default=0, le=10000)
+    segment_groups_range: str | None = None
     resolution: str = "1920x1080"
     image_aspect_ratio: str | None = None
     subtitle_style: Literal[

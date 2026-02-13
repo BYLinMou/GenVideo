@@ -25,7 +25,7 @@ from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
 )
-from .segmentation_service import build_segment_plan, resolve_precomputed_segments
+from .segmentation_service import build_segment_plan, resolve_precomputed_segments, select_segments_by_range
 from .scene_cache_service import (
     build_scene_descriptor,
     ensure_scene_cache_paths,
@@ -1477,7 +1477,11 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
     try:
         _update_job(job_id, base_url, "running", 0.05, "segment", "Segmenting text", current_segment=0, total_segments=0)
         segments, sentence_count = await _segment_text(payload)
-        if payload.max_segment_groups > 0:
+        if str(payload.segment_groups_range or "").strip():
+            segments = select_segments_by_range(segments, payload.segment_groups_range)
+            if not segments:
+                raise ValueError("segment_groups_range selected no segments (range is 1-based)")
+        elif payload.max_segment_groups > 0:
             segments = segments[: payload.max_segment_groups]
         if not segments:
             raise ValueError("No segment groups produced")
