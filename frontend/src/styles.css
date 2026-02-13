@@ -27,6 +27,12 @@ body {
   color: #475467;
 }
 
+.page-nav {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
 .card {
   background: #fff;
   border-radius: 12px;
@@ -337,6 +343,36 @@ label {
   border: 1px solid #eaecf0;
   border-radius: 10px;
   padding: 10px;
+}
+
+.final-video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.final-video-item {
+  border: 1px solid #eaecf0;
+  border-radius: 10px;
+  padding: 10px;
+  background: #fff;
+  display: grid;
+  gap: 6px;
+}
+
+.final-video-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid #f2f4f7;
+  background: #f8fafc;
+}
+
+.final-video-name {
+  font-weight: 600;
+  color: #101828;
+  word-break: break-all;
 }
 
 .clip-thumb-wrap {

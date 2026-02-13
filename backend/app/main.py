@@ -27,6 +27,8 @@ from .models import (
     CharacterImageItem,
     ConfirmCharactersRequest,
     CreateCharacterImageRequest,
+    FinalVideoItem,
+    FinalVideoListResponse,
     GenerateNovelAliasesRequest,
     GenerateNovelAliasesResponse,
     GenerateVideoRequest,
@@ -185,6 +187,63 @@ def _job_clip_path(job_id: str, clip_index: int) -> Path:
 
 def _job_clip_thumb_path(job_id: str, clip_index: int) -> Path:
     return project_path(settings.temp_dir) / job_id / "thumbs" / f"clip_{clip_index:04d}.jpg"
+
+
+def _resolve_final_video_path(filename: str) -> Path:
+    safe_name = Path(filename or "").name
+    if not safe_name or safe_name != str(filename or ""):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    if Path(safe_name).suffix.lower() != ".mp4":
+        raise HTTPException(status_code=400, detail="only mp4 files are supported")
+
+    target = project_path(settings.output_dir) / safe_name
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="video not found")
+    return target
+
+
+def _final_video_thumb_path(filename: str) -> Path:
+    safe_name = Path(filename or "").name
+    stem = Path(safe_name).stem
+    return project_path(settings.temp_dir) / "final_video_thumbs" / f"{stem}.jpg"
+
+
+def _ensure_final_video_thumbnail(filename: str) -> Path:
+    video_path = _resolve_final_video_path(filename)
+    thumb_path = _final_video_thumb_path(filename)
+
+    if thumb_path.exists():
+        try:
+            if thumb_path.stat().st_size >= 512 and thumb_path.stat().st_mtime >= video_path.stat().st_mtime:
+                return thumb_path
+        except Exception:
+            pass
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise RuntimeError("ffmpeg not found")
+
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "4",
+            str(thumb_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if proc.returncode != 0 or not thumb_path.exists():
+        raise RuntimeError((proc.stderr or "ffmpeg thumbnail failed")[:300])
+
+    return thumb_path
 
 
 def _ensure_job_clip_thumbnail(job_id: str, clip_index: int) -> Path:
@@ -598,3 +657,57 @@ async def get_job_clip_thumbnail(job_id: str, clip_index: int):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return FileResponse(thumb_path, media_type="image/jpeg", filename=thumb_path.name)
+
+
+@app.get("/api/final-videos", response_model=FinalVideoListResponse)
+async def list_final_videos(limit: int = 200) -> FinalVideoListResponse:
+    safe_limit = max(1, min(int(limit or 200), 2000))
+    output_root = project_path(settings.output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    rows: list[tuple[float, FinalVideoItem]] = []
+    for path in output_root.glob("*.mp4"):
+        try:
+            stat = path.stat()
+            created_ts = float(getattr(stat, "st_ctime", 0.0) or 0.0)
+            updated_ts = float(getattr(stat, "st_mtime", created_ts) or created_ts)
+            created_at = datetime.fromtimestamp(created_ts).isoformat(timespec="seconds")
+            updated_at = datetime.fromtimestamp(updated_ts).isoformat(timespec="seconds")
+            safe_name = path.name
+            encoded = quote(safe_name)
+            rows.append(
+                (
+                    created_ts,
+                    FinalVideoItem(
+                        filename=safe_name,
+                        size=int(stat.st_size),
+                        created_at=created_at,
+                        updated_at=updated_at,
+                        video_url=f"/outputs/{encoded}",
+                        thumbnail_url=f"/api/final-videos/{encoded}/thumb",
+                        download_url=f"/api/final-videos/{encoded}/download",
+                    ),
+                )
+            )
+        except Exception:
+            logger.exception("Failed to inspect final video file: %s", path)
+
+    sorted_rows = sorted(rows, key=lambda item: item[0], reverse=True)
+    return FinalVideoListResponse(videos=[item for _, item in sorted_rows[:safe_limit]])
+
+
+@app.get("/api/final-videos/{filename}/thumb")
+async def get_final_video_thumbnail(filename: str):
+    try:
+        thumb_path = await run_in_threadpool(_ensure_final_video_thumbnail, filename)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return FileResponse(thumb_path, media_type="image/jpeg", filename=thumb_path.name)
+
+
+@app.get("/api/final-videos/{filename}/download")
+async def download_final_video(filename: str):
+    path = _resolve_final_video_path(filename)
+    return FileResponse(path, media_type="video/mp4", filename=path.name)

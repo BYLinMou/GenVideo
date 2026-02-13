@@ -20,8 +20,14 @@ const loading = reactive({
   analyze: false,
   segment: false,
   generate: false,
-  logs: false
+  logs: false,
+  finalVideos: false
 })
+
+const PAGE_WORKSPACE = 'workspace'
+const PAGE_FINAL_VIDEOS = 'final-videos'
+const activePage = ref(PAGE_WORKSPACE)
+const finalVideos = ref([])
 
 const form = reactive({
   text: '',
@@ -709,6 +715,73 @@ function normalizeRuntimeUrl(raw) {
     return value
   } catch {
     return value
+  }
+}
+
+function resolvePageFromHash() {
+  if (typeof window === 'undefined') return PAGE_WORKSPACE
+  const hash = String(window.location.hash || '').trim().toLowerCase()
+  if (hash === '#/final-videos' || hash === '#final-videos') {
+    return PAGE_FINAL_VIDEOS
+  }
+  return PAGE_WORKSPACE
+}
+
+function setPageHash(page) {
+  if (typeof window === 'undefined') return
+  const target = page === PAGE_FINAL_VIDEOS ? '#/final-videos' : '#/workspace'
+  if (window.location.hash !== target) {
+    window.location.hash = target
+  }
+}
+
+async function loadFinalVideos(options = {}) {
+  const { silent = false } = options
+  loading.finalVideos = true
+  try {
+    const data = await api.listFinalVideos(500)
+    const items = Array.isArray(data?.videos) ? data.videos : []
+    finalVideos.value = items.map((item) => ({
+      filename: String(item.filename || ''),
+      size: Number(item.size || 0),
+      createdAt: String(item.created_at || ''),
+      updatedAt: String(item.updated_at || ''),
+      videoUrl: normalizeRuntimeUrl(item.video_url || ''),
+      thumbnailUrl: normalizeRuntimeUrl(item.thumbnail_url || ''),
+      downloadUrl: normalizeRuntimeUrl(item.download_url || '')
+    }))
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.finalVideosLoadFailed', { error: error.message }))
+    }
+    finalVideos.value = []
+  } finally {
+    loading.finalVideos = false
+  }
+}
+
+function formatDateTime(value) {
+  const text = String(value || '').trim()
+  if (!text) return '-'
+  const parsed = new Date(text)
+  if (Number.isNaN(parsed.getTime())) return text
+  return parsed.toLocaleString()
+}
+
+async function switchPage(page) {
+  const next = page === PAGE_FINAL_VIDEOS ? PAGE_FINAL_VIDEOS : PAGE_WORKSPACE
+  activePage.value = next
+  setPageHash(next)
+  if (next === PAGE_FINAL_VIDEOS && !finalVideos.value.length) {
+    await loadFinalVideos()
+  }
+}
+
+async function handleHashChange() {
+  const next = resolvePageFromHash()
+  activePage.value = next
+  if (next === PAGE_FINAL_VIDEOS) {
+    await loadFinalVideos({ silent: true })
   }
 }
 
@@ -1508,6 +1581,13 @@ async function removeJob(jobId) {
 }
 
 onMounted(async () => {
+  if (typeof window !== 'undefined') {
+    activePage.value = resolvePageFromHash()
+    if (!String(window.location.hash || '').trim()) {
+      setPageHash(activePage.value)
+    }
+    window.addEventListener('hashchange', handleHashChange)
+  }
   restoreJobSnapshot()
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
@@ -1516,10 +1596,16 @@ onMounted(async () => {
   if (jobs.value.length) {
     startPolling()
   }
+  if (activePage.value === PAGE_FINAL_VIDEOS) {
+    await loadFinalVideos({ silent: true })
+  }
 })
 
 onUnmounted(() => {
   stopPolling()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('hashchange', handleHashChange)
+  }
 })
 </script>
 
@@ -1529,6 +1615,17 @@ onUnmounted(() => {
       <h1>{{ t('app.title') }}</h1>
       <p>{{ t('app.subtitle') }}</p>
     </header>
+
+    <div class="page-nav">
+      <el-button :type="activePage === PAGE_WORKSPACE ? 'primary' : 'default'" @click="switchPage(PAGE_WORKSPACE)">
+        {{ t('page.workspace') }}
+      </el-button>
+      <el-button :type="activePage === PAGE_FINAL_VIDEOS ? 'primary' : 'default'" @click="switchPage(PAGE_FINAL_VIDEOS)">
+        {{ t('page.finalVideos') }}
+      </el-button>
+    </div>
+
+    <template v-if="activePage === PAGE_WORKSPACE">
 
     <section class="card">
       <h2>{{ t('section.config') }}</h2>
@@ -2009,6 +2106,31 @@ onUnmounted(() => {
       </div>
       <pre class="logs">{{ backendLogs.join('\n') }}</pre>
     </section>
+
+    </template>
+
+    <template v-else>
+      <section class="card">
+        <h2>{{ t('section.finalVideos') }}</h2>
+        <div class="actions">
+          <el-button :loading="loading.finalVideos" @click="loadFinalVideos">{{ t('action.refreshFinalVideos') }}</el-button>
+        </div>
+
+        <div v-if="finalVideos.length" class="final-video-grid">
+          <article v-for="item in finalVideos" :key="item.filename" class="final-video-item">
+            <img :src="item.thumbnailUrl" class="final-video-thumb" loading="lazy" :alt="item.filename" />
+            <div class="final-video-name">{{ item.filename }}</div>
+            <div class="muted">{{ t('hint.finalVideoCreatedAt', { time: formatDateTime(item.createdAt) }) }}</div>
+            <div class="muted">{{ t('hint.finalVideoSize', { size: formatFileSize(item.size) }) }}</div>
+            <div class="actions">
+              <a :href="item.videoUrl" target="_blank" rel="noopener noreferrer">{{ t('action.openFinalVideo') }}</a>
+              <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+            </div>
+          </article>
+        </div>
+        <el-empty v-else :description="t('hint.noFinalVideos')" />
+      </section>
+    </template>
 
     <el-dialog
       v-model="refPicker.visible"

@@ -243,4 +243,28 @@ Object.assign(zhCN.hint, {
   imageSourceReportOther: '其他来源 {other}/{total}（{otherRatio}）'
 })
 
+Object.assign(zhCN.page || (zhCN.page = {}), {
+  workspace: '生成工作台',
+  finalVideos: '成片库'
+})
+
+Object.assign(zhCN.section, {
+  finalVideos: '最终视频列表'
+})
+
+Object.assign(zhCN.action, {
+  refreshFinalVideos: '刷新成片列表',
+  openFinalVideo: '查看视频'
+})
+
+Object.assign(zhCN.hint, {
+  noFinalVideos: '暂无最终视频',
+  finalVideoCreatedAt: '创建时间：{time}',
+  finalVideoSize: '文件大小：{size}'
+})
+
+Object.assign(zhCN.toast, {
+  finalVideosLoadFailed: '加载最终视频列表失败：{error}'
+})
+
 export default zhCN

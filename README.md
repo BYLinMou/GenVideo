@@ -94,6 +94,9 @@ Default: `http://localhost:8000`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}/thumb` (on-demand cached clip thumbnail, JPG)
 - `GET /api/jobs/{job_id}/video`
+- `GET /api/final-videos?limit=200` (list final videos sorted by creation time desc)
+- `GET /api/final-videos/{filename}/thumb` (on-demand cached final-video thumbnail)
+- `GET /api/final-videos/{filename}/download`
 
 ## Frontend
 
@@ -106,6 +109,17 @@ npm run dev
 ```
 
 Default: `http://localhost:5173`
+
+Page paths (hash mode in current frontend):
+
+- Workspace: `#/workspace`
+- Final videos library: `#/final-videos`
+
+Final videos library behavior:
+
+- List is sorted by creation time (newest first)
+- First load shows thumbnails only (no full video preload)
+- Each card provides `View Video` and `Download` actions
 
 ## Environment
 

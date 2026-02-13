@@ -196,3 +196,17 @@ class BgmLibraryItem(BaseModel):
 class BgmSelectRequest(BaseModel):
     filename: str
 
+
+class FinalVideoItem(BaseModel):
+    filename: str
+    size: int
+    created_at: str
+    updated_at: str
+    video_url: str
+    thumbnail_url: str
+    download_url: str
+
+
+class FinalVideoListResponse(BaseModel):
+    videos: list[FinalVideoItem]
+

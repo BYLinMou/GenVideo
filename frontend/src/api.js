@@ -125,6 +125,10 @@ export const api = {
   getClipThumbnailUrl(jobId, clipIndex) {
     return buildApiUrl(`/api/jobs/${jobId}/clips/${clipIndex}/thumb`)
   },
+  listFinalVideos(limit = 200) {
+    const safeLimit = Math.max(1, Math.min(Number(limit || 200), 2000))
+    return request(`/api/final-videos?limit=${safeLimit}&_ts=${Date.now()}`, { cache: 'no-store' })
+  },
   listCharacterRefImages() {
     return request('/api/character-reference-images')
   },
