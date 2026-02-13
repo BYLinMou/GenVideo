@@ -44,7 +44,10 @@ async function request(path, options = {}) {
   const data = await parseJson(response)
   if (!response.ok) {
     const msg = data?.detail || data?.message || `Request failed: ${response.status}`
-    throw new Error(msg)
+    const error = new Error(msg)
+    error.status = response.status
+    error.payload = data
+    throw error
   }
   return data
 }
@@ -102,6 +105,9 @@ export const api = {
   },
   cancelJob(jobId) {
     return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
+  },
+  resumeJob(jobId) {
+    return jsonRequest(`/api/jobs/${jobId}/resume`, 'POST')
   },
   getJob(jobId) {
     return request(`/api/jobs/${jobId}?_ts=${Date.now()}`, { cache: 'no-store' })

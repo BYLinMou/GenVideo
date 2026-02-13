@@ -87,8 +87,8 @@ const sceneProgressPercent = computed(() => {
 const sceneProgressText = computed(() => {
   const total = Math.max(0, Number(job.totalSegments || 0))
   const current = Math.max(0, Number(job.currentSegment || 0))
-  if (!total) return '未开始'
-  return `Scene ${Math.min(current, total)}/${total}`
+  if (!total) return t('hint.sceneNotStarted')
+  return t('hint.sceneProgress', { current: Math.min(current, total), total })
 })
 
 const bgmStatus = reactive({
@@ -334,7 +334,7 @@ function extractReplacementCandidates(text, limit = 24) {
 
 function detectNameReplacementCandidates() {
   if (!form.text.trim()) {
-    ElMessage.warning('请先输入文本')
+    ElMessage.warning(t('toast.textRequired'))
     return
   }
 
@@ -353,10 +353,10 @@ function detectNameReplacementCandidates() {
   })
 
   if (!replacementEntries.value.length) {
-    ElMessage.warning('未检测到可替换的高频词（至少出现 2 次）')
+    ElMessage.warning(t('toast.noReplacementCandidates'))
     return
   }
-  ElMessage.success(`已检测到 ${replacementEntries.value.length} 个候选词`)
+  ElMessage.success(t('toast.replacementCandidatesDetected', { count: replacementEntries.value.length }))
 }
 
 function clearNameReplacementEntries() {
@@ -373,7 +373,7 @@ function syncReplacementEntry(entry) {
 function removeChapterHeadings() {
   const source = form.text || ''
   if (!source.trim()) {
-    ElMessage.warning('请先输入文本')
+    ElMessage.warning(t('toast.textRequired'))
     return
   }
 
@@ -402,12 +402,12 @@ function removeChapterHeadings() {
   })
 
   if (!changed) {
-    ElMessage.info('未检测到可过滤的章节前缀')
+    ElMessage.info(t('toast.chapterHeadingNotFound'))
     return
   }
 
   form.text = normalized.join('\n')
-  ElMessage.success(`已处理 ${changed} 处章节前缀`)
+  ElMessage.success(t('toast.chapterHeadingProcessed', { count: changed }))
 }
 
 function activeReplacementPairs() {
@@ -432,18 +432,18 @@ function applyNameReplacements(text) {
 
 function applyReplacementsToSourceText() {
   if (!form.text.trim()) {
-    ElMessage.warning('请先输入文本')
+    ElMessage.warning(t('toast.textRequired'))
     return
   }
 
   const transformed = applyNameReplacements(form.text)
   if (transformed === form.text) {
-    ElMessage.info('没有可应用的替换项')
+    ElMessage.info(t('toast.noReplacementToApply'))
     return
   }
 
   form.text = transformed
-  ElMessage.success('已将字典替换应用到上方文本')
+  ElMessage.success(t('toast.replacementApplied'))
 }
 
 function resetJob() {
@@ -463,7 +463,7 @@ function createLocalJobRecord(jobId) {
     id: String(jobId || ''),
     status: 'queued',
     step: 'queued',
-    message: 'Job queued',
+    message: t('toast.jobQueuedMessage'),
     progress: 0,
     currentSegment: 0,
     totalSegments: 0,
@@ -818,7 +818,10 @@ function stopPolling() {
 async function pollJobsOnce() {
   if (pollingBusy) return
   const ids = jobs.value.map((item) => String(item.id || '')).filter(Boolean)
-  if (!ids.length) return
+  if (!ids.length) {
+    stopPolling()
+    return
+  }
 
   pollingBusy = true
   try {
@@ -837,8 +840,9 @@ async function pollJobsOnce() {
             }
           }
         } catch (error) {
+          const statusCode = Number(error?.status || error?.statusCode || 0)
           const msg = String(error?.message || '')
-          if (msg.includes('404')) {
+          if (statusCode === 404 || msg.includes('404') || msg.toLowerCase().includes('job not found')) {
             removeJobRecord(id)
           }
         }
@@ -846,6 +850,9 @@ async function pollJobsOnce() {
     )
   } finally {
     pollingBusy = false
+    if (!jobs.value.length) {
+      stopPolling()
+    }
     persistJobSnapshot()
   }
 }
@@ -869,9 +876,9 @@ async function runGenerate() {
 
   if (!String(form.novel_alias || '').trim()) {
     try {
-      await ElMessageBox.confirm('还没有设置顶部书名，是否先去添加？', '提示', {
-        confirmButtonText: '去设置',
-        cancelButtonText: '继续生成',
+      await ElMessageBox.confirm(t('dialog.missingAliasMessage'), t('dialog.tipTitle'), {
+        confirmButtonText: t('dialog.goSetup'),
+        cancelButtonText: t('dialog.continueGenerate'),
         type: 'warning',
         distinguishCancelAndClose: true
       })
@@ -928,7 +935,7 @@ async function runGenerate() {
       ...createLocalJobRecord(id),
       status: data.status || 'queued',
       step: data.status || 'queued',
-      message: 'Job queued',
+      message: t('toast.jobQueuedMessage'),
       updatedAt: Date.now()
     })
     selectJob(id)
@@ -951,6 +958,19 @@ async function cancelCurrentJob() {
     await pollJobsOnce()
   } catch (error) {
     ElMessage.error(t('toast.cancelFailed', { error: error.message }))
+  }
+}
+
+async function resumeCurrentJob() {
+  if (!activeJobId.value) return
+  try {
+    await api.resumeJob(activeJobId.value)
+    ElMessage.success(t('toast.resumeRequested'))
+    const status = await api.getJob(activeJobId.value)
+    syncActiveJobRecordFromApiStatus(activeJobId.value, status)
+    startPolling()
+  } catch (error) {
+    ElMessage.error(t('toast.resumeFailed', { error: error.message }))
   }
 }
 
@@ -1016,7 +1036,7 @@ async function generateRefImage(character, index) {
 async function generateNovelAliases() {
   const textForRun = applyNameReplacements(form.text)
   if (!textForRun.trim()) {
-    ElMessage.warning('请先输入文本')
+    ElMessage.warning(t('toast.textRequired'))
     return
   }
 
@@ -1029,12 +1049,12 @@ async function generateNovelAliases() {
     })
     novelAliases.value = data.aliases || []
     if (!novelAliases.value.length) {
-      ElMessage.warning('未生成可用别名，请重试')
+      ElMessage.warning(t('toast.aliasEmpty'))
     } else {
-      ElMessage.success(`已生成 ${novelAliases.value.length} 个别名`) 
+      ElMessage.success(t('toast.aliasGenerated', { count: novelAliases.value.length }))
     }
   } catch (error) {
-    ElMessage.error(`别名生成失败：${error.message}`)
+    ElMessage.error(t('toast.aliasGenerateFailed', { error: error.message }))
   } finally {
     loading.aliases = false
   }
@@ -1043,13 +1063,13 @@ async function generateNovelAliases() {
 function applyAlias(alias) {
   if (!alias) return
   form.novel_alias = alias
-  ElMessage.success(`已应用别名：${alias}`)
+  ElMessage.success(t('toast.aliasApplied', { alias }))
 }
 
 function applyCustomAlias() {
   const alias = (customAliasInput.value || '').trim()
   if (!alias) {
-    ElMessage.warning('请先输入别名')
+    ElMessage.warning(t('toast.aliasInputRequired'))
     return
   }
   applyAlias(alias)
@@ -1097,11 +1117,11 @@ async function uploadBgmFile(event) {
   if (!file) return
   try {
     await api.uploadBgm(file)
-    ElMessage.success('BGM 上传成功')
+    ElMessage.success(t('toast.bgmUploadSuccess'))
     await loadBgmLibrary()
     await loadBgmStatus()
   } catch (error) {
-    ElMessage.error(`BGM 上传失败：${error.message}`)
+    ElMessage.error(t('toast.bgmUploadFailed', { error: error.message }))
   } finally {
     event.target.value = ''
   }
@@ -1115,9 +1135,9 @@ async function uploadWatermarkFile(event) {
     form.watermark_image_path = created.path || ''
     form.watermark_type = 'image'
     form.watermark_enabled = true
-    ElMessage.success('水印图片上传成功')
+    ElMessage.success(t('toast.watermarkUploadSuccess'))
   } catch (error) {
-    ElMessage.error(`水印图片上传失败：${error.message}`)
+    ElMessage.error(t('toast.watermarkUploadFailed', { error: error.message }))
   } finally {
     event.target.value = ''
   }
@@ -1126,27 +1146,27 @@ async function uploadWatermarkFile(event) {
 async function pickBgm(item) {
   try {
     await api.selectBgm(item.filename)
-    ElMessage.success('已切换当前BGM')
+    ElMessage.success(t('toast.bgmSwitchSuccess'))
     await loadBgmStatus()
     closeBgmPicker()
   } catch (error) {
-    ElMessage.error(`切换BGM失败：${error.message}`)
+    ElMessage.error(t('toast.bgmSwitchFailed', { error: error.message }))
   }
 }
 
 async function deleteCurrentBgm() {
   try {
     await api.deleteCurrentBgm()
-    ElMessage.success('已删除当前BGM')
+    ElMessage.success(t('toast.bgmDeleteSuccess'))
     await loadBgmStatus()
   } catch (error) {
-    ElMessage.error(`删除当前BGM失败：${error.message}`)
+    ElMessage.error(t('toast.bgmDeleteFailed', { error: error.message }))
   }
 }
 
 async function remixCurrentVideoBgm() {
   if (!activeJobId.value) {
-    ElMessage.warning('请先生成至少一次视频')
+    ElMessage.warning(t('toast.remixNeedVideo'))
     return
   }
   try {
@@ -1168,9 +1188,9 @@ async function remixCurrentVideoBgm() {
       job.videoUrl = nextUrl
     }
     persistJobSnapshot()
-    ElMessage.success('已完成仅替换BGM（无需重跑全流程）')
+    ElMessage.success(t('toast.remixSuccess'))
   } catch (error) {
-    ElMessage.error(`仅替换BGM失败：${error.message}`)
+    ElMessage.error(t('toast.remixFailed', { error: error.message }))
   } finally {
     loading.generate = false
   }
@@ -1179,7 +1199,7 @@ async function remixCurrentVideoBgm() {
 async function recoverJobById() {
   const id = String(recoverJobIdInput.value || '').trim()
   if (!id) {
-    ElMessage.warning('请先输入任务ID')
+    ElMessage.warning(t('toast.jobIdRequired'))
     return
   }
   try {
@@ -1189,9 +1209,9 @@ async function recoverJobById() {
     recoverJobIdInput.value = ''
     persistJobSnapshot()
     startPolling()
-    ElMessage.success(`已恢复任务：${id}`)
+    ElMessage.success(t('toast.recoverSuccess', { id }))
   } catch (error) {
-    ElMessage.error(`恢复任务失败：${error.message}`)
+    ElMessage.error(t('toast.recoverFailed', { error: error.message }))
   }
 }
 
@@ -1211,8 +1231,9 @@ async function removeJob(jobId) {
     try {
       await api.cancelJob(id)
     } catch (error) {
+      const statusCode = Number(error?.status || error?.statusCode || 0)
       const message = String(error?.message || '')
-      if (!message.includes('404')) {
+      if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('job not found')) {
         ElMessage.error(t('toast.cancelFailed', { error: error.message }))
         return
       }
@@ -1337,9 +1358,9 @@ onUnmounted(() => {
         <div>
           <label>{{ t('field.subtitleStyle') }}</label>
           <el-select v-model="form.subtitle_style" style="width: 100%">
-            <el-option label="黄字黑边" value="yellow_black" />
-            <el-option label="黑字白边" value="black_white" />
-            <el-option label="白字黑边" value="white_black" />
+            <el-option :label="t('option.subtitleYellowBlack')" value="yellow_black" />
+            <el-option :label="t('option.subtitleBlackWhite')" value="black_white" />
+            <el-option :label="t('option.subtitleWhiteBlack')" value="white_black" />
           </el-select>
         </div>
 
@@ -1367,13 +1388,13 @@ onUnmounted(() => {
         </div>
 
         <div>
-          <label>顶部书名（最终叠加）</label>
-          <el-input ref="novelAliasInputRef" v-model="form.novel_alias" placeholder="视频顶部书名（可留空）" clearable />
-          <p class="muted" style="margin: 6px 0 0">书名将作为最终合成顶栏叠加，不再写入正文</p>
+          <label>{{ t('field.novelAliasTitle') }}</label>
+          <el-input ref="novelAliasInputRef" v-model="form.novel_alias" :placeholder="t('placeholder.novelAlias')" clearable />
+          <p class="muted" style="margin: 6px 0 0">{{ t('hint.novelAliasHelp') }}</p>
         </div>
 
         <div>
-          <label>背景音乐音量</label>
+          <label>{{ t('field.bgmVolumeLabel') }}</label>
           <el-slider
             v-model="form.bgm_volume"
             :min="0"
@@ -1384,6 +1405,27 @@ onUnmounted(() => {
             :show-input-controls="false"
             input-size="small"
           />
+        </div>
+      </div>
+
+      <div class="replace-toolbar">
+        <div class="actions">
+          <el-input v-model="customAliasInput" :placeholder="t('placeholder.customAlias')" clearable style="max-width: 260px" @keyup.enter="applyCustomAlias" />
+          <el-button @click="applyCustomAlias">{{ t('action.addAlias') }}</el-button>
+          <el-button :loading="loading.aliases" @click="generateNovelAliases">{{ t('action.generateAliases') }}</el-button>
+          <el-button :disabled="loading.aliases" @click="generateNovelAliases">{{ t('action.regenerateAliases') }}</el-button>
+          <span class="muted" v-if="novelAliases.length">{{ t('hint.aliasClickToApply') }}</span>
+        </div>
+        <div class="alias-list" v-if="novelAliases.length">
+          <el-tag
+            v-for="item in novelAliases"
+            :key="item"
+            class="alias-item"
+            effect="plain"
+            @click="applyAlias(item)"
+          >
+            {{ item }}
+          </el-tag>
         </div>
       </div>
 
@@ -1400,24 +1442,24 @@ onUnmounted(() => {
       </div>
       <div class="switch-row">
         <el-switch v-model="form.bgm_enabled" />
-        <span>启用背景音乐（BGM）</span>
+        <span>{{ t('field.bgmEnabledLabel') }}</span>
         <label class="upload-btn">
           <input type="file" accept=".mp3,audio/mpeg" @change="uploadBgmFile" />
-          上传BGM
+          {{ t('action.uploadBgm') }}
         </label>
-        <el-button @click="openBgmPicker">从BGM库选择</el-button>
-        <el-button type="danger" plain @click="deleteCurrentBgm">删除当前BGM</el-button>
+        <el-button @click="openBgmPicker">{{ t('action.selectBgmFromLibrary') }}</el-button>
+        <el-button type="danger" plain @click="deleteCurrentBgm">{{ t('action.deleteCurrentBgm') }}</el-button>
       </div>
       <div class="switch-row">
         <el-switch v-model="form.watermark_enabled" />
-        <span>启用水印</span>
+        <span>{{ t('field.watermarkEnabledLabel') }}</span>
         <el-select v-model="form.watermark_type" style="width: 140px" :disabled="!form.watermark_enabled">
-          <el-option label="文字" value="text" />
-          <el-option label="图片" value="image" />
+          <el-option :label="t('option.watermarkText')" value="text" />
+          <el-option :label="t('option.watermarkImage')" value="image" />
         </el-select>
         <el-input
           v-model="form.watermark_text"
-          placeholder="水印文字"
+          :placeholder="t('placeholder.watermarkText')"
           clearable
           style="max-width: 220px"
           :disabled="!form.watermark_enabled || form.watermark_type !== 'text'"
@@ -1429,12 +1471,12 @@ onUnmounted(() => {
             @change="uploadWatermarkFile"
             :disabled="!form.watermark_enabled || form.watermark_type !== 'image'"
           />
-          上传水印图
+          {{ t('action.uploadWatermark') }}
         </label>
       </div>
       <div class="grid">
         <div>
-          <label>水印透明度</label>
+          <label>{{ t('field.watermarkOpacityLabel') }}</label>
           <el-slider
             v-model="form.watermark_opacity"
             :min="0.05"
@@ -1448,60 +1490,32 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="muted bgm-status" v-if="form.watermark_image_path">
-        <span>水印图片：{{ form.watermark_image_path.split('/').pop() }}</span>
+        <span>{{ t('hint.watermarkImageSelected', { filename: form.watermark_image_path.split('/').pop() }) }}</span>
       </div>
       <div class="muted bgm-status">
         <span v-if="bgmStatus.exists">
-          当前BGM：{{ bgmStatus.filename }} ｜ {{ formatFileSize(bgmStatus.size) }}
-          <span v-if="bgmStatus.source_filename"> ｜ 来源：{{ bgmStatus.source_filename }}</span>
-          <span v-if="bgmStatus.updated_at"> ｜ 更新时间：{{ bgmStatus.updated_at }}</span>
+          {{ t('hint.currentBgm', { filename: bgmStatus.filename, size: formatFileSize(bgmStatus.size) }) }}
+          <span v-if="bgmStatus.source_filename"> ｜ {{ t('hint.source', { source: bgmStatus.source_filename }) }}</span>
+          <span v-if="bgmStatus.updated_at"> ｜ {{ t('hint.updatedAt', { time: bgmStatus.updated_at }) }}</span>
         </span>
-        <span v-else>当前BGM：未找到（默认回退 assets/bgm/happinessinmusic-rock-trailer-417598.mp3）</span>
+        <span v-else>{{ t('hint.currentBgmFallback') }}</span>
       </div>
     </section>
 
     <section class="card">
       <h2>{{ t('section.text') }}</h2>
-      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
-      <div class="actions">
-        <el-button @click="removeChapterHeadings">过滤章节标题</el-button>
-        <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
-        <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
-      </div>
-
       <div class="replace-toolbar">
         <div class="switch-row">
           <el-switch v-model="nameReplace.enabled" />
-          <span>启用名字替换字典</span>
+          <span>{{ t('field.nameReplacementEnabled') }}</span>
         </div>
         <div class="actions">
-          <el-button type="primary" @click="applyReplacementsToSourceText">执行替换</el-button>
-          <el-button @click="detectNameReplacementCandidates">检测高频词</el-button>
-          <el-button @click="clearNameReplacementEntries">清空字典</el-button>
+          <el-button type="primary" @click="applyReplacementsToSourceText">{{ t('action.applyReplacement') }}</el-button>
+          <el-button @click="detectNameReplacementCandidates">{{ t('action.detectReplacementCandidates') }}</el-button>
+          <el-button @click="clearNameReplacementEntries">{{ t('action.clearReplacementDict') }}</el-button>
           <span class="muted" v-if="replacementEntries.length">
-            共 {{ replacementEntries.length }} 个候选，已启用 {{ replacementEnabledCount }} 个
+            {{ t('hint.replacementSummary', { total: replacementEntries.length, enabled: replacementEnabledCount }) }}
           </span>
-        </div>
-      </div>
-
-      <div class="replace-toolbar">
-        <div class="actions">
-          <el-input v-model="customAliasInput" placeholder="手动输入别名" clearable style="max-width: 260px" @keyup.enter="applyCustomAlias" />
-          <el-button @click="applyCustomAlias">添加</el-button>
-          <el-button :loading="loading.aliases" @click="generateNovelAliases">生成小说别名（10个）</el-button>
-          <el-button :disabled="loading.aliases" @click="generateNovelAliases">重新生成</el-button>
-          <span class="muted" v-if="novelAliases.length">点击下方任意别名即可应用</span>
-        </div>
-        <div class="alias-list" v-if="novelAliases.length">
-          <el-tag
-            v-for="item in novelAliases"
-            :key="item"
-            class="alias-item"
-            effect="plain"
-            @click="applyAlias(item)"
-          >
-            {{ item }}
-          </el-tag>
         </div>
       </div>
 
@@ -1511,8 +1525,15 @@ onUnmounted(() => {
           <span class="word">{{ entry.word }}</span>
           <span class="muted">×{{ entry.count }}</span>
           <span class="arrow">→</span>
-          <el-input v-model="entry.replacement" placeholder="替换成..." clearable @input="syncReplacementEntry(entry)" />
+          <el-input v-model="entry.replacement" :placeholder="t('placeholder.replacementTarget')" clearable @input="syncReplacementEntry(entry)" />
         </div>
+      </div>
+
+      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
+      <div class="actions">
+        <el-button @click="removeChapterHeadings">{{ t('action.filterChapterHeadings') }}</el-button>
+        <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
+        <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
       </div>
 
       <el-alert
@@ -1520,7 +1541,7 @@ onUnmounted(() => {
         type="info"
         show-icon
         :closable="false"
-        title="名字替换已生效：分段/分析/生成都将使用替换后的文本"
+        :title="t('hint.replacementAppliedInfo')"
       />
 
       <el-alert
@@ -1544,7 +1565,7 @@ onUnmounted(() => {
       <ol class="segments">
         <li v-for="item in segmentPreview.segments" :key="item.index">
           <strong>#{{ item.index + 1 }}</strong>
-          <span class="muted">（{{ item.sentence_count || '?' }} 句）</span>
+          <span class="muted">{{ t('hint.segmentSentenceCount', { count: item.sentence_count || '?' }) }}</span>
           <div>{{ item.text }}</div>
         </li>
       </ol>
@@ -1621,12 +1642,15 @@ onUnmounted(() => {
     </section>
 
     <section class="card">
-      <h2>{{ t('section.render') }}</h2>
+      <h2>{{ t('section.jobRecovery') }}</h2>
       <div class="job-restore-row">
-        <el-input v-model="recoverJobIdInput" placeholder="输入任务ID后恢复进度" clearable style="max-width: 360px" />
-        <el-button @click="recoverJobById">恢复任务</el-button>
+        <el-input v-model="recoverJobIdInput" :placeholder="t('placeholder.recoverJobId')" clearable style="max-width: 360px" />
+        <el-button @click="recoverJobById">{{ t('action.recoverJob') }}</el-button>
       </div>
+    </section>
 
+    <section class="card">
+      <h2>{{ t('section.render') }}</h2>
       <div v-if="sortedJobs.length" class="job-list">
         <div
           v-for="item in sortedJobs"
@@ -1644,25 +1668,26 @@ onUnmounted(() => {
               <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
             </div>
           </div>
-          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">移除</el-button>
+          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
         </div>
       </div>
 
       <div class="actions">
         <el-button type="primary" :loading="loading.generate" @click="runGenerate">{{ t('action.generateVideo') }}</el-button>
-        <el-button :loading="loading.generate" :disabled="!activeJobId" @click="remixCurrentVideoBgm">仅替换BGM（最后一步）</el-button>
+        <el-button :loading="loading.generate" :disabled="!activeJobId" @click="remixCurrentVideoBgm">{{ t('action.remixBgmOnly') }}</el-button>
         <el-button :disabled="!activeJobId" type="danger" @click="cancelCurrentJob">{{ t('action.cancelJob') }}</el-button>
+        <el-button :disabled="!activeJobId" @click="resumeCurrentJob">{{ t('action.resumeJob') }}</el-button>
       </div>
 
       <div v-if="job.id" class="job">
         <p><strong>{{ t('hint.jobId') }}：</strong>{{ job.id }}</p>
         <p><strong>{{ t('hint.jobStatus') }}：</strong>{{ job.status }} / {{ job.step }}</p>
         <p><strong>{{ t('hint.jobMessage') }}：</strong>{{ job.message }}</p>
-        <p><strong>当前场景：</strong>{{ sceneProgressText }}</p>
+        <p><strong>{{ t('hint.currentScene') }}：</strong>{{ sceneProgressText }}</p>
         <el-progress :percentage="sceneProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')">
           <span>{{ sceneProgressPercent }}%</span>
         </el-progress>
-        <p><strong>总体进度：</strong>{{ uiProgressPercent }}%</p>
+        <p><strong>{{ t('hint.overallProgress') }}：</strong>{{ uiProgressPercent }}%</p>
         <el-progress :percentage="uiProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')" />
       </div>
 
@@ -1707,7 +1732,7 @@ onUnmounted(() => {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="bgmPicker.visible" title="BGM音乐库" width="820px" :close-on-click-modal="false" @closed="closeBgmPicker">
+    <el-dialog v-model="bgmPicker.visible" :title="t('section.bgmLibrary')" width="820px" :close-on-click-modal="false" @closed="closeBgmPicker">
       <div class="ref-library-modal" v-if="bgmLibrary.length">
         <div v-for="item in bgmLibrary" :key="item.path" class="ref-option" @click="pickBgm(item)">
           <div class="filename">{{ item.filename }}</div>
@@ -1715,9 +1740,9 @@ onUnmounted(() => {
           <audio :src="item.url" controls preload="none" class="bgm-audio" @click.stop></audio>
         </div>
       </div>
-      <el-empty v-else description="暂无BGM，请先上传" />
+      <el-empty v-else :description="t('hint.noBgm')" />
       <template #footer>
-        <el-button @click="closeBgmPicker">关闭</el-button>
+        <el-button @click="closeBgmPicker">{{ t('action.close') }}</el-button>
       </template>
     </el-dialog>
   </div>

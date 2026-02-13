@@ -37,6 +37,8 @@ class Settings(BaseSettings):
     scene_cache_dir: str = Field(default="assets/scene_cache/images", alias="SCENE_CACHE_DIR")
     scene_cache_index_path: str = Field(default="assets/scene_cache/index.json", alias="SCENE_CACHE_INDEX_PATH")
     scene_cache_db_path: str = Field(default="assets/scene_cache/scene_cache.db", alias="SCENE_CACHE_DB_PATH")
+    jobs_db_path: str = Field(default="assets/jobs/jobs.db", alias="JOBS_DB_PATH")
+    job_clip_preview_limit: int = Field(default=200, alias="JOB_CLIP_PREVIEW_LIMIT")
     log_dir: str = Field(default="logs", alias="LOG_DIR")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     cors_allow_origins: str = Field(default="*", alias="CORS_ALLOW_ORIGINS")

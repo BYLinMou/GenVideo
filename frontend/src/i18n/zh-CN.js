@@ -116,4 +116,108 @@ const zhCN = {
   }
 }
 
+Object.assign(zhCN.hint, {
+  sceneNotStarted: '未开始',
+  sceneProgress: 'Scene {current}/{total}',
+  novelAliasHelp: '书名将作为最终合成顶栏叠加，不再写入正文',
+  aliasClickToApply: '点击下方任意别名即可应用',
+  watermarkImageSelected: '水印图片：{filename}',
+  currentBgm: '当前BGM：{filename} ｜ {size}',
+  source: '来源：{source}',
+  updatedAt: '更新时间：{time}',
+  currentBgmFallback: '当前BGM：未找到（默认回退 assets/bgm/happinessinmusic-rock-trailer-417598.mp3）',
+  replacementSummary: '共 {total} 个候选，已启用 {enabled} 个',
+  replacementAppliedInfo: '名字替换已生效：分段/分析/生成都将使用替换后的文本',
+  segmentSentenceCount: '（{count} 句）',
+  currentScene: '当前场景',
+  overallProgress: '总体进度',
+  noBgm: '暂无BGM，请先上传'
+})
+
+Object.assign(zhCN.toast, {
+  noReplacementCandidates: '未检测到可替换的高频词（至少出现 2 次）',
+  replacementCandidatesDetected: '已检测到 {count} 个候选词',
+  chapterHeadingNotFound: '未检测到可过滤的章节前缀',
+  chapterHeadingProcessed: '已处理 {count} 处章节前缀',
+  noReplacementToApply: '没有可应用的替换项',
+  replacementApplied: '已将字典替换应用到上方文本',
+  jobQueuedMessage: '任务已排队',
+  resumeRequested: '已请求继续生成',
+  resumeFailed: '继续生成失败：{error}',
+  aliasEmpty: '未生成可用别名，请重试',
+  aliasGenerated: '已生成 {count} 个别名',
+  aliasGenerateFailed: '别名生成失败：{error}',
+  aliasApplied: '已应用别名：{alias}',
+  aliasInputRequired: '请先输入别名',
+  bgmUploadSuccess: 'BGM 上传成功',
+  bgmUploadFailed: 'BGM 上传失败：{error}',
+  watermarkUploadSuccess: '水印图片上传成功',
+  watermarkUploadFailed: '水印图片上传失败：{error}',
+  bgmSwitchSuccess: '已切换当前BGM',
+  bgmSwitchFailed: '切换BGM失败：{error}',
+  bgmDeleteSuccess: '已删除当前BGM',
+  bgmDeleteFailed: '删除当前BGM失败：{error}',
+  remixNeedVideo: '请先生成至少一次视频',
+  remixSuccess: '已完成仅替换BGM（无需重跑全流程）',
+  remixFailed: '仅替换BGM失败：{error}',
+  jobIdRequired: '请先输入任务ID',
+  recoverSuccess: '已恢复任务：{id}',
+  recoverFailed: '恢复任务失败：{error}'
+})
+
+Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
+  missingAliasMessage: '还没有设置顶部书名，是否先去添加？',
+  tipTitle: '提示',
+  goSetup: '去设置',
+  continueGenerate: '继续生成'
+})
+
+Object.assign(zhCN.option, {
+  subtitleYellowBlack: '黄字黑边',
+  subtitleBlackWhite: '黑字白边',
+  subtitleWhiteBlack: '白字黑边',
+  watermarkText: '文字',
+  watermarkImage: '图片'
+})
+
+Object.assign(zhCN.field, {
+  novelAliasTitle: '顶部书名（最终叠加）',
+  bgmVolumeLabel: '背景音乐音量',
+  bgmEnabledLabel: '启用背景音乐（BGM）',
+  watermarkEnabledLabel: '启用水印',
+  watermarkOpacityLabel: '水印透明度',
+  nameReplacementEnabled: '启用名字替换字典'
+})
+
+Object.assign(zhCN.placeholder, {
+  novelAlias: '视频顶部书名（可留空）',
+  customAlias: '手动输入别名',
+  watermarkText: '水印文字',
+  replacementTarget: '替换成...',
+  recoverJobId: '输入任务ID后恢复进度'
+})
+
+Object.assign(zhCN.action, {
+  addAlias: '添加',
+  generateAliases: '生成小说别名（10个）',
+  regenerateAliases: '重新生成',
+  uploadBgm: '上传BGM',
+  selectBgmFromLibrary: '从BGM库选择',
+  deleteCurrentBgm: '删除当前BGM',
+  uploadWatermark: '上传水印图',
+  applyReplacement: '执行替换',
+  detectReplacementCandidates: '检测高频词',
+  clearReplacementDict: '清空字典',
+  filterChapterHeadings: '过滤章节标题',
+  recoverJob: '恢复任务',
+  remove: '移除',
+  remixBgmOnly: '仅替换BGM（最后一步）',
+  resumeJob: '继续生成'
+})
+
+Object.assign(zhCN.section, {
+  jobRecovery: '任务恢复',
+  bgmLibrary: 'BGM音乐库'
+})
+
 export default zhCN

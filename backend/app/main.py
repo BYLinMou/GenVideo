@@ -30,6 +30,7 @@ from .models import (
     GenerateNovelAliasesResponse,
     GenerateVideoRequest,
     GenerateVideoResponse,
+    JobStatus,
     RemixBgmRequest,
     RemixBgmResponse,
     SegmentItem,
@@ -48,7 +49,7 @@ from .services.llm_service import (
 from .services.segmentation_service import build_segment_plan
 from .services.segmentation_service import count_sentences
 from .services.model_service import get_models
-from .services.video_service import _render_final_sync, cancel_job, create_job
+from .services.video_service import _render_final_sync, cancel_job, create_job, resume_interrupted_jobs, resume_job
 from .state import job_store
 from .voice_catalog import VOICE_INFOS
 
@@ -75,6 +76,7 @@ project_path("assets/bgm").mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_dir).mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_index_path).parent.mkdir(parents=True, exist_ok=True)
 project_path(settings.scene_cache_db_path).parent.mkdir(parents=True, exist_ok=True)
+project_path(settings.jobs_db_path).parent.mkdir(parents=True, exist_ok=True)
 
 app.mount("/outputs", StaticFiles(directory=project_path(settings.output_dir)), name="outputs")
 app.mount(
@@ -128,6 +130,59 @@ def _current_bgm_source_filename() -> str | None:
         except Exception:
             continue
     return None
+
+
+def _build_disk_job_status(job_id: str) -> JobStatus | None:
+    final_path = project_path(settings.output_dir) / f"{job_id}.mp4"
+    if not final_path.exists():
+        return None
+    try:
+        if int(final_path.stat().st_size) < 16384:
+            return None
+    except Exception:
+        return None
+
+    clip_root = project_path(settings.temp_dir) / job_id / "clips"
+    clip_count = sum(1 for _ in clip_root.glob("clip_*.mp4")) if clip_root.exists() else 0
+    preview_limit = max(0, min(clip_count, int(settings.job_clip_preview_limit or 0)))
+    preview_urls = [f"/api/jobs/{job_id}/clips/{index}" for index in range(preview_limit)]
+
+    return JobStatus(
+        job_id=job_id,
+        status="completed",
+        progress=1.0,
+        step="done",
+        message="Recovered from output directory",
+        current_segment=clip_count,
+        total_segments=clip_count,
+        output_video_url=f"/api/jobs/{job_id}/video",
+        output_video_path=str(final_path),
+        clip_count=clip_count,
+        clip_preview_urls=preview_urls,
+    )
+
+
+def _resolve_job_status(job_id: str) -> JobStatus | None:
+    status = job_store.get(job_id)
+
+    if status and status.status in {"queued", "running"}:
+        return status
+
+    recovered = _build_disk_job_status(job_id)
+    if recovered and (not status or status.status in {"failed", "cancelled"} or not status.output_video_path):
+        job_store.set(recovered)
+        return recovered
+
+    if status:
+        return status
+    return recovered
+
+
+@app.on_event("startup")
+async def _recover_jobs_on_startup() -> None:
+    resumed = resume_interrupted_jobs()
+    if resumed:
+        logger.info("Recovered interrupted jobs: %s", ", ".join(resumed))
 
 
 @app.exception_handler(Exception)
@@ -386,7 +441,7 @@ async def generate_video(request: Request, payload: GenerateVideoRequest) -> Gen
 
 @app.post("/api/jobs/{job_id}/remix-bgm", response_model=RemixBgmResponse)
 async def remix_bgm(request: Request, job_id: str, payload: RemixBgmRequest) -> RemixBgmResponse:
-    status = job_store.get(job_id)
+    status = _resolve_job_status(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found")
     if status.status != "completed" or not status.output_video_path:
@@ -433,9 +488,22 @@ async def cancel_video_job(request: Request, job_id: str) -> dict:
     return {"status": "cancel_requested", "job_id": job_id}
 
 
+@app.post("/api/jobs/{job_id}/resume")
+async def resume_video_job(request: Request, job_id: str) -> dict:
+    base_url = str(request.base_url).rstrip("/")
+    ok, code = resume_job(job_id, base_url)
+    if not ok:
+        if code == "not_found":
+            raise HTTPException(status_code=404, detail="job not found")
+        if code == "already_completed":
+            raise HTTPException(status_code=409, detail="job already completed")
+        raise HTTPException(status_code=409, detail="job cannot resume")
+    return {"status": code, "job_id": job_id}
+
+
 @app.get("/api/jobs/{job_id}")
 async def get_job_status(job_id: str) -> dict:
-    status = job_store.get(job_id)
+    status = _resolve_job_status(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found")
     return status.model_dump()
@@ -443,7 +511,7 @@ async def get_job_status(job_id: str) -> dict:
 
 @app.get("/api/jobs/{job_id}/video")
 async def get_job_video(job_id: str):
-    status = job_store.get(job_id)
+    status = _resolve_job_status(job_id)
     if not status:
         raise HTTPException(status_code=404, detail="job not found")
     if status.status != "completed" or not status.output_video_path:
