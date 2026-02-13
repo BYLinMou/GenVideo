@@ -44,7 +44,10 @@ async function request(path, options = {}) {
   const data = await parseJson(response)
   if (!response.ok) {
     const msg = data?.detail || data?.message || `Request failed: ${response.status}`
-    throw new Error(msg)
+    const error = new Error(msg)
+    error.status = response.status
+    error.payload = data
+    throw error
   }
   return data
 }

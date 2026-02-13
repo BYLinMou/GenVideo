@@ -818,7 +818,10 @@ function stopPolling() {
 async function pollJobsOnce() {
   if (pollingBusy) return
   const ids = jobs.value.map((item) => String(item.id || '')).filter(Boolean)
-  if (!ids.length) return
+  if (!ids.length) {
+    stopPolling()
+    return
+  }
 
   pollingBusy = true
   try {
@@ -837,8 +840,9 @@ async function pollJobsOnce() {
             }
           }
         } catch (error) {
+          const statusCode = Number(error?.status || error?.statusCode || 0)
           const msg = String(error?.message || '')
-          if (msg.includes('404')) {
+          if (statusCode === 404 || msg.includes('404') || msg.toLowerCase().includes('job not found')) {
             removeJobRecord(id)
           }
         }
@@ -846,6 +850,9 @@ async function pollJobsOnce() {
     )
   } finally {
     pollingBusy = false
+    if (!jobs.value.length) {
+      stopPolling()
+    }
     persistJobSnapshot()
   }
 }
@@ -1211,8 +1218,9 @@ async function removeJob(jobId) {
     try {
       await api.cancelJob(id)
     } catch (error) {
+      const statusCode = Number(error?.status || error?.statusCode || 0)
       const message = String(error?.message || '')
-      if (!message.includes('404')) {
+      if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('job not found')) {
         ElMessage.error(t('toast.cancelFailed', { error: error.message }))
         return
       }
@@ -1387,6 +1395,27 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <div class="replace-toolbar">
+        <div class="actions">
+          <el-input v-model="customAliasInput" placeholder="手动输入别名" clearable style="max-width: 260px" @keyup.enter="applyCustomAlias" />
+          <el-button @click="applyCustomAlias">添加</el-button>
+          <el-button :loading="loading.aliases" @click="generateNovelAliases">生成小说别名（10个）</el-button>
+          <el-button :disabled="loading.aliases" @click="generateNovelAliases">重新生成</el-button>
+          <span class="muted" v-if="novelAliases.length">点击下方任意别名即可应用</span>
+        </div>
+        <div class="alias-list" v-if="novelAliases.length">
+          <el-tag
+            v-for="item in novelAliases"
+            :key="item"
+            class="alias-item"
+            effect="plain"
+            @click="applyAlias(item)"
+          >
+            {{ item }}
+          </el-tag>
+        </div>
+      </div>
+
       <div class="switch-row">
         <el-switch v-model="form.enable_scene_image_reuse" />
         <span>{{ t('field.sceneReuse') }}</span>
@@ -1462,13 +1491,6 @@ onUnmounted(() => {
 
     <section class="card">
       <h2>{{ t('section.text') }}</h2>
-      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
-      <div class="actions">
-        <el-button @click="removeChapterHeadings">过滤章节标题</el-button>
-        <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
-        <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
-      </div>
-
       <div class="replace-toolbar">
         <div class="switch-row">
           <el-switch v-model="nameReplace.enabled" />
@@ -1484,27 +1506,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div class="replace-toolbar">
-        <div class="actions">
-          <el-input v-model="customAliasInput" placeholder="手动输入别名" clearable style="max-width: 260px" @keyup.enter="applyCustomAlias" />
-          <el-button @click="applyCustomAlias">添加</el-button>
-          <el-button :loading="loading.aliases" @click="generateNovelAliases">生成小说别名（10个）</el-button>
-          <el-button :disabled="loading.aliases" @click="generateNovelAliases">重新生成</el-button>
-          <span class="muted" v-if="novelAliases.length">点击下方任意别名即可应用</span>
-        </div>
-        <div class="alias-list" v-if="novelAliases.length">
-          <el-tag
-            v-for="item in novelAliases"
-            :key="item"
-            class="alias-item"
-            effect="plain"
-            @click="applyAlias(item)"
-          >
-            {{ item }}
-          </el-tag>
-        </div>
-      </div>
-
       <div v-if="replacementEntries.length" class="replace-list">
         <div class="replace-item" v-for="entry in replacementEntries" :key="entry.word">
           <el-checkbox v-model="entry.enabled" :disabled="!entry.replacement.trim()" />
@@ -1513,6 +1514,13 @@ onUnmounted(() => {
           <span class="arrow">→</span>
           <el-input v-model="entry.replacement" placeholder="替换成..." clearable @input="syncReplacementEntry(entry)" />
         </div>
+      </div>
+
+      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
+      <div class="actions">
+        <el-button @click="removeChapterHeadings">过滤章节标题</el-button>
+        <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
+        <el-button type="primary" :loading="loading.analyze" @click="runAnalyze">{{ t('action.analyze') }}</el-button>
       </div>
 
       <el-alert
