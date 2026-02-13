@@ -1293,17 +1293,12 @@ def _cleanup_segment_artifacts(temp_root: Path, segment_index: int) -> None:
             logger.debug("Failed to cleanup artifact: %s", target)
 
 
-def _is_valid_media_file(path: Path, min_bytes: int = 4096) -> bool:
-    if not path.exists() or not path.is_file():
-        return False
-
-
 def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> list[str]:
     clip_paths: list[str] = []
     total = max(0, int(total_segments or 0))
     for index in range(total):
         clip_path = clip_root / f"clip_{index:04d}.mp4"
-        if not _is_valid_media_file(clip_path):
+        if not clip_path.exists() or not clip_path.is_file():
             raise FileNotFoundError(f"Missing segment clip for compose: {clip_path}")
         clip_paths.append(str(clip_path))
     return clip_paths
@@ -1533,7 +1528,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             audio_path = temp_root / f"segment_{index:04d}.mp3"
             clip_path = clip_root / f"clip_{index:04d}.mp4"
 
-            if _is_valid_media_file(clip_path):
+            if clip_path.exists() and clip_path.is_file():
                 rendered_clip_count += 1
                 completed_ratio = (index + 1) / max(total, 1)
                 _update_job(
@@ -1642,7 +1637,15 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         output_root.mkdir(parents=True, exist_ok=True)
         final_path = output_root / f"{job_id}.mp4"
 
-        if _is_valid_media_file(final_path, min_bytes=16384):
+        final_exists = final_path.exists() and final_path.is_file()
+        final_size_ok = False
+        if final_exists:
+            try:
+                final_size_ok = int(final_path.stat().st_size) >= 16384
+            except Exception:
+                final_size_ok = False
+
+        if final_exists and final_size_ok:
             _update_job(
                 job_id,
                 base_url,
