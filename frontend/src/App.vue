@@ -29,7 +29,7 @@ const form = reactive({
   segment_method: 'sentence',
   sentences_per_segment: 5,
   max_segment_groups: 0,
-  segment_groups_range: '',
+  segment_groups_range: '0',
   resolution: '1920x1080',
   image_aspect_ratio: '',
   subtitle_style: 'white_black',
