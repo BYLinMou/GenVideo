@@ -106,6 +106,9 @@ export const api = {
   cancelJob(jobId) {
     return jsonRequest(`/api/jobs/${jobId}/cancel`, 'POST')
   },
+  resumeJob(jobId) {
+    return jsonRequest(`/api/jobs/${jobId}/resume`, 'POST')
+  },
   getJob(jobId) {
     return request(`/api/jobs/${jobId}?_ts=${Date.now()}`, { cache: 'no-store' })
   },

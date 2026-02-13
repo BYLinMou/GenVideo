@@ -1809,3 +1809,51 @@ def cancel_job(job_id: str, base_url: str) -> bool:
             )
         )
     return True
+
+
+def resume_job(job_id: str, base_url: str) -> tuple[bool, str]:
+    current = job_store.get(job_id)
+    if not current:
+        return False, "not_found"
+
+    if current.status == "completed":
+        return False, "already_completed"
+
+    loaded = job_store.load_payload(job_id)
+    if not loaded:
+        _update_job(
+            job_id,
+            base_url,
+            "failed",
+            1.0,
+            "error",
+            "Job payload missing, cannot resume",
+            current_segment=current.current_segment,
+            total_segments=current.total_segments,
+            output_video_path=current.output_video_path,
+            clip_count=current.clip_count,
+        )
+        return False, "payload_missing"
+
+    payload, stored_base_url = loaded
+    effective_base_url = base_url or stored_base_url
+    job_store.save_payload(job_id, payload, effective_base_url)
+    job_store.clear_cancel(job_id)
+
+    _update_job(
+        job_id,
+        effective_base_url,
+        "queued",
+        max(0.0, min(float(current.progress or 0.0), 0.95)),
+        "resume",
+        "Resume requested, continue from checkpoint",
+        current_segment=current.current_segment,
+        total_segments=current.total_segments,
+        output_video_path=current.output_video_path,
+        clip_count=current.clip_count,
+    )
+
+    started = _start_job_runner(job_id=job_id, payload=payload, base_url=effective_base_url)
+    if not started:
+        return True, "already_running"
+    return True, "resume_requested"

@@ -961,6 +961,19 @@ async function cancelCurrentJob() {
   }
 }
 
+async function resumeCurrentJob() {
+  if (!activeJobId.value) return
+  try {
+    await api.resumeJob(activeJobId.value)
+    ElMessage.success('已请求继续生成')
+    const status = await api.getJob(activeJobId.value)
+    syncActiveJobRecordFromApiStatus(activeJobId.value, status)
+    startPolling()
+  } catch (error) {
+    ElMessage.error(`继续生成失败：${error.message}`)
+  }
+}
+
 async function uploadRefImage(event, character) {
   const file = event.target.files?.[0]
   if (!file) return
@@ -1663,6 +1676,7 @@ onUnmounted(() => {
         <el-button type="primary" :loading="loading.generate" @click="runGenerate">{{ t('action.generateVideo') }}</el-button>
         <el-button :loading="loading.generate" :disabled="!activeJobId" @click="remixCurrentVideoBgm">仅替换BGM（最后一步）</el-button>
         <el-button :disabled="!activeJobId" type="danger" @click="cancelCurrentJob">{{ t('action.cancelJob') }}</el-button>
+        <el-button :disabled="!activeJobId" @click="resumeCurrentJob">继续生成</el-button>
       </div>
 
       <div v-if="job.id" class="job">

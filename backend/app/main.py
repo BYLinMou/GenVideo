@@ -49,7 +49,7 @@ from .services.llm_service import (
 from .services.segmentation_service import build_segment_plan
 from .services.segmentation_service import count_sentences
 from .services.model_service import get_models
-from .services.video_service import _render_final_sync, cancel_job, create_job, resume_interrupted_jobs
+from .services.video_service import _render_final_sync, cancel_job, create_job, resume_interrupted_jobs, resume_job
 from .state import job_store
 from .voice_catalog import VOICE_INFOS
 
@@ -486,6 +486,19 @@ async def cancel_video_job(request: Request, job_id: str) -> dict:
     if not cancel_job(job_id, base_url):
         raise HTTPException(status_code=404, detail="job not found")
     return {"status": "cancel_requested", "job_id": job_id}
+
+
+@app.post("/api/jobs/{job_id}/resume")
+async def resume_video_job(request: Request, job_id: str) -> dict:
+    base_url = str(request.base_url).rstrip("/")
+    ok, code = resume_job(job_id, base_url)
+    if not ok:
+        if code == "not_found":
+            raise HTTPException(status_code=404, detail="job not found")
+        if code == "already_completed":
+            raise HTTPException(status_code=409, detail="job already completed")
+        raise HTTPException(status_code=409, detail="job cannot resume")
+    return {"status": code, "job_id": job_id}
 
 
 @app.get("/api/jobs/{job_id}")

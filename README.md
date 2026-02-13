@@ -89,6 +89,7 @@ Default: `http://localhost:8000`
 - `POST /api/generate-video`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
+- `POST /api/jobs/{job_id}/resume` (continue cancelled/failed/interrupted job from checkpoint)
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
 - `GET /api/jobs/{job_id}/video`
