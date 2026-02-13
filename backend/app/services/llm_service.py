@@ -9,6 +9,16 @@ import httpx
 from ..config import settings
 from ..models import CharacterSuggestion
 from ..voice_catalog import VOICE_INFOS, recommend_voice
+from .prompt_templates import (
+    SEGMENT_IMAGE_BUNDLE_RULES,
+    STRICT_JSON_SYSTEM_PROMPT,
+    build_alias_prompt,
+    build_character_analysis_prompt,
+    build_character_identity_guard,
+    build_fallback_segment_image_prompt,
+    build_final_segment_image_prompt,
+    build_smart_segmentation_prompt,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -304,16 +314,11 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
     if not settings.llm_api_key:
         return segment_by_sentence_groups(clean_text, sentences_per_segment=5)
 
-    prompt = (
-        "Split the following novel text into short-video segments. "
-        "Try to cut at scene transitions and keep semantic coherence. "
-        "Return strict JSON only in this schema: {\"segments\":[\"Segment 1\",\"Segment 2\"]}.\n\n"
-        f"Text:\n{clean_text[:14000]}"
-    )
+    prompt = build_smart_segmentation_prompt(clean_text)
     payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.2,
@@ -443,37 +448,18 @@ def _character_identity_guard(character: CharacterSuggestion) -> str:
     if not anchor_parts:
         anchor_parts = [name]
     anchors = "; ".join(anchor_parts)
-    personality_clause = f" Character personality and vibe: {personality}." if personality else ""
-    reference_clause = (
-        f"Use the provided reference image only for identity matching of {name} "
-        "(face, hair, body shape, outfit details). "
-        "Do not copy composition or background from the reference image. "
-        if has_reference
-        else "No reference image is available; enforce identity from appearance anchors only. "
-    )
-
-    return (
-        "Character consistency is mandatory across frames. "
-        "But if current segment is better represented as environment-only/scene-only, character does not need to appear in frame. "
-        f"{reference_clause}"
-        "Never change core identity (age/gender/face/hair/outfit signature). "
-        f"Character appearance anchors: {anchors}."
-        f"{personality_clause}"
+    return build_character_identity_guard(
+        name=name,
+        anchors=anchors,
+        personality=personality,
+        has_reference=has_reference,
     )
 
 
 def _fallback_segment_image_prompt(character: CharacterSuggestion, segment_text: str) -> str:
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
-
-    return (
-        f"{guard} "
-        "Build one single image frame according to this current plot segment: "
-        f"{scene_text}. "
-        "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
-        "Background and action must come from the current plot segment. "
-        "anime-style cinematic illustration, detailed lighting, clean composition, no text, no watermark"
-    )
+    return build_fallback_segment_image_prompt(guard=guard, scene_text=scene_text)
 
 
 def _fallback_segment_image_bundle(character: CharacterSuggestion, segment_text: str) -> dict:
@@ -500,19 +486,7 @@ async def build_segment_image_bundle(
     selected_model = model_id or settings.llm_default_model
     request_body = {
         "task": "build_image_prompt_for_story_segment",
-        "rules": [
-            "Keep character identity highly consistent across scenes.",
-            "Character appearance is optional per frame: LLM may output pure scene/environment frame when segment focus is on place/atmosphere/system message.",
-            "Reference image (if present) is for character look only, never for scene/background.",
-            "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
-            "Scene/background/action must be inferred from current segment text.",
-            "Output one concise production-ready prompt in English.",
-            "Also output strict scene metadata for cache-reuse matching.",
-            "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
-            "Location must be concrete place if present (e.g. classroom, corridor, street).",
-            "Scene elements must be concrete visual nouns/background details.",
-            "No markdown, no explanation.",
-        ],
+        "rules": list(SEGMENT_IMAGE_BUNDLE_RULES),
         "character": {
             "name": _clean_text(character.name, 120),
             "appearance": _clean_text(character.appearance, 800),
@@ -536,7 +510,7 @@ async def build_segment_image_bundle(
     payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": json.dumps(request_body, ensure_ascii=False)},
         ],
         "temperature": 0.15,
@@ -555,13 +529,7 @@ async def build_segment_image_bundle(
             parsed = _extract_json_object(content)
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
-                final_prompt = (
-                    f"{guard} "
-                    f"Current plot segment: {scene_text}. "
-                    "If character is not necessary for this segment, you may generate scene-only frame. "
-                    "Scene/background/action must follow current plot segment. "
-                    f"Additional style and composition details: {candidate}"
-                )
+                final_prompt = build_final_segment_image_prompt(guard=guard, scene_text=scene_text, candidate=candidate)
                 metadata = _normalize_scene_metadata(parsed)
                 if not metadata.get("action_hint"):
                     metadata["action_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("action_hint", "")
@@ -634,27 +602,15 @@ def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
 
 
 def _character_prompt(text: str, depth: str) -> str:
-    detail = "Output detailed fields" if depth == "detailed" else "Output concise fields"
     voice_lines = "\n".join(
         f"- {voice.id} | {voice.name} | {voice.gender}/{voice.age} | {voice.description}" for voice in VOICE_INFOS
     )
     allowed_ids = ", ".join(sorted(_VOICE_ID_SET))
-    return (
-        "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
-        f"{detail}. "
-        "voice_id must be selected strictly from the allowed voice IDs below. "
-        "Do not invent any new voice name or ID. "
-        "If unsure, choose the closest one from the list. "
-        "JSON schema: "
-        "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
-        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
-        "\"confidence\":0.0}"
-        "\n\nAllowed voice IDs: "
-        f"{allowed_ids}"
-        "\nVoice catalog:"
-        f"\n{voice_lines}"
-        "\n\nText:\n"
-        f"{text[:14000]}"
+    return build_character_analysis_prompt(
+        text=text,
+        depth=depth,
+        allowed_ids=allowed_ids,
+        voice_lines=voice_lines,
     )
 
 
@@ -735,18 +691,7 @@ def _fallback_aliases(text: str, count: int) -> list[str]:
 
 
 def _alias_prompt(text: str, count: int) -> str:
-    return (
-        "你是中文小说命名顾问。请基于文本生成小说‘别名’候选。"
-        "硬性规则：\n"
-        "1) 每个别名必须是4到8个汉字；\n"
-        "2) 不能包含数字、英文字母、标点符号、空格；\n"
-        "3) 禁止使用常见词语/俗语/成语/地名作为核心表达；\n"
-        "4) 风格要和原文题材、情绪、意象一致；\n"
-        f"5) 一次输出{count}个，不要重复；\n"
-        "6) 禁止使用生僻字，尽量使用常用汉字。\n"
-        "仅输出严格JSON：{\"aliases\":[\"别名1\",\"别名2\"]}\n\n"
-        f"文本：\n{text[:12000]}"
-    )
+    return build_alias_prompt(text=text, count=count)
 
 
 async def generate_novel_aliases(text: str, count: int, model_id: str | None) -> tuple[list[str], str]:
@@ -774,7 +719,7 @@ async def generate_novel_aliases(text: str, count: int, model_id: str | None) ->
     payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": _alias_prompt(text, wanted)},
         ],
         "temperature": 0.85,
@@ -839,7 +784,7 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
     payload = {
         "model": selected_model,
         "messages": [
-            {"role": "system", "content": "You are a strict JSON generator."},
+            {"role": "system", "content": STRICT_JSON_SYSTEM_PROMPT},
             {"role": "user", "content": _character_prompt(text, depth)},
         ],
         "temperature": 0.2,

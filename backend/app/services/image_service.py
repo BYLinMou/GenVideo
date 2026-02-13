@@ -11,6 +11,7 @@ import httpx
 from PIL import Image
 
 from ..config import settings
+from .prompt_templates import DEFAULT_IMAGE_PROMPT, build_image_retry_prompt
 
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def _build_messages(
 ) -> list[dict]:
     prompt_text = str(prompt or "").strip()
     if not prompt_text:
-        prompt_text = "Generate one single image based on the current plot segment."
+        prompt_text = DEFAULT_IMAGE_PROMPT
 
     candidate_paths: list[str] = []
     if reference_image_path:
@@ -152,10 +153,7 @@ async def generate_image(
         logger.warning("Primary image generation failed: %s", first_error)
         # Some proxy/image backends may return HTTP 200 but no image URL for pure CJK prompts.
         # Retry with an English wrapper before failing hard.
-        retry_prompt = (
-            "Create one single image only. Do not explain. "
-            f"Anime-style illustration based on this description: {prompt}"
-        )
+        retry_prompt = build_image_retry_prompt(prompt)
         retry_payload = {
             "model": settings.image_model,
             "messages": _build_messages(

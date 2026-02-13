@@ -8,25 +8,14 @@ from uuid import uuid4
 from ..config import project_path, settings
 from ..models import CharacterImageItem
 from .image_service import generate_image
+from .prompt_templates import build_character_reference_prompt
 
 
 logger = logging.getLogger(__name__)
 
 
 def _build_character_reference_prompt(prompt: str) -> str:
-    base = (prompt or "").strip()
-    full_body_rules = (
-        "Character reference sheet style. "
-        "Show only one character (the target character) in the image. "
-        "No other people, no crowd, no background characters, no extra faces. "
-        "Must show full body from head to toe in frame. "
-        "Do NOT crop to half body, portrait, or close-up. "
-        "Include key props/weapons/accessories in full view. "
-        "Keep anatomy complete and visible."
-    )
-    if not base:
-        return full_body_rules
-    return f"{base}. {full_body_rules}"
+    return build_character_reference_prompt(prompt)
 
 
 def list_character_reference_images() -> list[CharacterImageItem]:

@@ -1,0 +1,150 @@
+from __future__ import annotations
+
+STRICT_JSON_SYSTEM_PROMPT = "You are a strict JSON generator."
+SCENE_REUSE_SELECTOR_SYSTEM_PROMPT = "You are a strict JSON selector for scene-image reuse. Output JSON only."
+
+DEFAULT_IMAGE_PROMPT = "Generate one single image based on the current plot segment."
+
+CHARACTER_REFERENCE_FULL_BODY_RULES = (
+    "Character reference sheet style. "
+    "2D Japanese anime style, clean line art, cel shading, non-photorealistic. "
+    "Show only one character (the target character) in the image. "
+    "No other people, no crowd, no background characters, no extra faces. "
+    "Must show full body from head to toe in frame. "
+    "Do NOT crop to half body, portrait, or close-up. "
+    "Include key props/weapons/accessories in full view. "
+    "Keep anatomy complete and visible."
+)
+
+SEGMENT_IMAGE_BUNDLE_RULES = (
+    "Keep facial identity consistent across scenes; hairstyle and outfit may change when required by the current segment.",
+    "Character appearance is optional per frame: LLM may output pure scene/environment frame when segment focus is on place/atmosphere/system message.",
+    "Reference image (if present) is for character look only, never for scene/background.",
+    "Prefer 2D Japanese anime style, clean line art and cel shading; avoid photorealistic or 3D-render look.",
+    "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
+    "Scene/background/action must be inferred from current segment text.",
+    "Output one concise production-ready prompt in English.",
+    "Also output strict scene metadata for cache-reuse matching.",
+    "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
+    "Location must be concrete place if present (e.g. classroom, corridor, street).",
+    "Scene elements must be concrete visual nouns/background details.",
+    "No markdown, no explanation.",
+)
+
+SCENE_REUSE_SELECTOR_RULES = (
+    "This decision is strict: if uncertain, return should_reuse=false.",
+    "User experience first: avoid wrong reuse. Wrong reuse is worse than generating a new image.",
+    "Only reuse at high match level.",
+    "If target has reference_image_paths, selected candidate must overlap at least one same path.",
+    "If target has reference_image_ids, selected candidate must overlap at least one same id.",
+    "character_match must be true, otherwise reject.",
+    "action_match must be true, otherwise reject.",
+    "If both sides contain location hints, location_match must be true.",
+    "If scene elements differ substantially, reject.",
+    "Do not select by writing style; only compare character, action and location.",
+    "Return strict JSON only.",
+)
+
+
+def build_smart_segmentation_prompt(clean_text: str) -> str:
+    return (
+        "Split the following novel text into short-video segments. "
+        "Try to cut at scene transitions and keep semantic coherence. "
+        "Return strict JSON only in this schema: {\"segments\":[\"Segment 1\",\"Segment 2\"]}.\n\n"
+        f"Text:\n{clean_text[:14000]}"
+    )
+
+
+def build_character_identity_guard(
+    name: str,
+    anchors: str,
+    personality: str,
+    has_reference: bool,
+) -> str:
+    personality_clause = f" Character personality and vibe: {personality}." if personality else ""
+    reference_clause = (
+        f"Use the provided reference image primarily for facial identity matching of {name} "
+        "(face shape, key facial features, expression style). "
+        "Do not copy composition or background from the reference image. "
+        if has_reference
+        else "No reference image is available; enforce identity from appearance anchors only. "
+    )
+    return (
+        "Character consistency is mandatory across frames. "
+        "But if current segment is better represented as environment-only/scene-only, character does not need to appear in frame. "
+        f"{reference_clause}"
+        "Never change core facial identity. Hairstyle and outfit may adapt to plot needs. "
+        f"Character appearance anchors: {anchors}."
+        f"{personality_clause}"
+    )
+
+
+def build_fallback_segment_image_prompt(guard: str, scene_text: str) -> str:
+    return (
+        f"{guard} "
+        "Build one single image frame according to this current plot segment: "
+        f"{scene_text}. "
+        "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
+        "Background and action must come from the current plot segment. "
+        "2D Japanese anime style, clean line art, cel shading, expressive eyes, cinematic illustration, detailed lighting, clean composition, non-photorealistic, no 3D render, no text, no watermark"
+    )
+
+
+def build_final_segment_image_prompt(guard: str, scene_text: str, candidate: str) -> str:
+    return (
+        f"{guard} "
+        f"Current plot segment: {scene_text}. "
+        "If character is not necessary for this segment, you may generate scene-only frame. "
+        "Scene/background/action must follow current plot segment. "
+        f"Additional style and composition details: {candidate}"
+    )
+
+
+def build_character_analysis_prompt(text: str, depth: str, allowed_ids: str, voice_lines: str) -> str:
+    detail = "Output detailed fields" if depth == "detailed" else "Output concise fields"
+    return (
+        "You are a novel character analysis assistant. Extract major characters from the text and return JSON only. "
+        f"{detail}. "
+        "voice_id must be selected strictly from the allowed voice IDs below. "
+        "Do not invent any new voice name or ID. "
+        "If unsure, choose the closest one from the list. "
+        "JSON schema: "
+        "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
+        "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
+        "\"confidence\":0.0}"
+        "\n\nAllowed voice IDs: "
+        f"{allowed_ids}"
+        "\nVoice catalog:"
+        f"\n{voice_lines}"
+        "\n\nText:\n"
+        f"{text[:14000]}"
+    )
+
+
+def build_alias_prompt(text: str, count: int) -> str:
+    return (
+        "你是中文小说命名顾问。请基于文本生成小说‘别名’候选。"
+        "硬性规则：\n"
+        "1) 每个别名必须是4到8个汉字；\n"
+        "2) 不能包含数字、英文字母、标点符号、空格；\n"
+        "3) 禁止使用常见词语/俗语/成语/地名作为核心表达；\n"
+        "4) 风格要和原文题材、情绪、意象一致；\n"
+        f"5) 一次输出{count}个，不要重复；\n"
+        "6) 禁止使用生僻字，尽量使用常用汉字。\n"
+        "仅输出严格JSON：{\"aliases\":[\"别名1\",\"别名2\"]}\n\n"
+        f"文本：\n{text[:12000]}"
+    )
+
+
+def build_character_reference_prompt(prompt: str) -> str:
+    base = (prompt or "").strip()
+    if not base:
+        return CHARACTER_REFERENCE_FULL_BODY_RULES
+    return f"{base}. {CHARACTER_REFERENCE_FULL_BODY_RULES}"
+
+
+def build_image_retry_prompt(prompt: str) -> str:
+    return (
+        "Create one single image only. Do not explain. "
+        f"2D Japanese anime style, clean line art, cel shading, expressive eyes, non-photorealistic, no 3D render. Illustration based on this description: {prompt}"
+    )

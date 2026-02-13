@@ -16,6 +16,7 @@ from PIL import Image
 
 from ..config import project_path, settings
 from ..models import CharacterSuggestion
+from .prompt_templates import SCENE_REUSE_SELECTOR_RULES, SCENE_REUSE_SELECTOR_SYSTEM_PROMPT
 
 
 logger = logging.getLogger(__name__)
@@ -841,19 +842,7 @@ async def _llm_match_candidate(
     model = model_id or settings.llm_default_model
     prompt = {
         "task": "select_reusable_scene_image",
-        "rules": [
-            "This decision is strict: if uncertain, return should_reuse=false.",
-            "User experience first: avoid wrong reuse. Wrong reuse is worse than generating a new image.",
-            "Only reuse at high match level.",
-            "If target has reference_image_paths, selected candidate must overlap at least one same path.",
-            "If target has reference_image_ids, selected candidate must overlap at least one same id.",
-            "character_match must be true, otherwise reject.",
-            "action_match must be true, otherwise reject.",
-            "If both sides contain location hints, location_match must be true.",
-            "If scene elements differ substantially, reject.",
-            "Do not select by writing style; only compare character, action and location.",
-            "Return strict JSON only.",
-        ],
+        "rules": list(SCENE_REUSE_SELECTOR_RULES),
         "target": {
             "character_name": target_profile.get("character_name", ""),
             "character_role": target_profile.get("character_role", ""),
@@ -903,7 +892,7 @@ async def _llm_match_candidate(
         "messages": [
             {
                 "role": "system",
-                "content": "You are a strict JSON selector for scene-image reuse. Output JSON only.",
+                "content": SCENE_REUSE_SELECTOR_SYSTEM_PROMPT,
             },
             {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
         ],
