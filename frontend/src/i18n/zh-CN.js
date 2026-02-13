@@ -220,4 +220,22 @@ Object.assign(zhCN.section, {
   bgmLibrary: 'BGM音乐库'
 })
 
+Object.assign(zhCN.field, {
+  segmentGroupsRangeHelp: '1开始，可写 1-80,81-90；单写 60=1-60；0/-1=全部'
+})
+
+Object.assign(zhCN.placeholder, {
+  segmentGroupsRange: '例如：1-80,81-90 / 60 / 0（全部）'
+})
+
+Object.assign(zhCN.toast, {
+  segmentRangeInvalid: '段数范围格式不正确，请使用 1-80,81-90 / 60（1-60）/ 0 或 -1（全部）'
+})
+
+Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
+  tooManySegmentsMessage: '本次将处理 {count} 段，超过建议上限 {limit} 段。建议先减少段数，是否继续生成？',
+  tooManySegmentsContinue: '继续生成',
+  tooManySegmentsReduce: '先去减少段数'
+})
+
 export default zhCN

@@ -25,15 +25,14 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 
 ## Core Semantics (Important)
 
-- Sentence splitting supports punctuation: `。！？!?；;，,`
-- `sentences_per_segment = N` means **N sentences per segment group**
-- Recommended default is `sentences_per_segment = 1` for sentence-by-sentence pacing
-- One segment group generates one clip
-- One segment group generates one image prompt call (reference image is passed when available)
-- Before generating a new segment image, backend checks reusable cached images by structured text descriptor
-- Cache matching is text-only (character/action/scene descriptors), no image input required
-- `max_segment_groups = 0` means process all groups
-- `max_segment_groups = 2` with `sentences_per_segment = 5` means process up to `2 * 5 = 10` sentences
+- Sentence splitting supports CJK punctuation (e.g. `。！？；`).
+- `sentences_per_segment = N` means each segment contains `N` sentences.
+- One segment generates one clip.
+- One segment triggers one image prompt call (with reference images if available).
+- Scene-image cache matching is text-only (character/action/scene descriptors).
+- `segment_groups_range` supports 1-based ranges, e.g. `1-80,81-90`.
+- A single value like `60` means `1-60`.
+- A single non-positive value like `0` or `-1` means all segments.
 
 ## Backend
 
@@ -90,8 +89,10 @@ Default: `http://localhost:8000`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
 - `POST /api/jobs/{job_id}/resume` (continue cancelled/failed/interrupted job from checkpoint)
+- `GET /api/jobs?limit=100` (list recent jobs from SQLite, used by frontend recovery/sync)
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
+- `GET /api/jobs/{job_id}/clips/{clip_index}/thumb` (on-demand cached clip thumbnail, JPG)
 - `GET /api/jobs/{job_id}/video`
 
 ## Frontend

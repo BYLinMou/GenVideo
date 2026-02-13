@@ -163,6 +163,25 @@ class JobStore:
                 return None
             return self._row_to_status(row)
 
+    def list_recent(self, limit: int = 100) -> list[JobStatus]:
+        safe_limit = max(1, min(int(limit or 100), 500))
+        with self.lock:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    """
+                    SELECT
+                        job_id, status, progress, step, message,
+                        current_segment, total_segments,
+                        output_video_url, output_video_path,
+                        clip_count, clip_preview_urls_json
+                    FROM jobs
+                    ORDER BY updated_at DESC
+                    LIMIT ?
+                    """,
+                    (safe_limit,),
+                ).fetchall()
+        return [self._row_to_status(row) for row in rows]
+
     def save_payload(self, job_id: str, payload: GenerateVideoRequest, base_url: str) -> None:
         with self.lock:
             now = _now_iso()

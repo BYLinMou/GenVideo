@@ -29,6 +29,7 @@ const form = reactive({
   segment_method: 'sentence',
   sentences_per_segment: 5,
   max_segment_groups: 0,
+  segment_groups_range: '0',
   resolution: '1920x1080',
   image_aspect_ratio: '',
   subtitle_style: 'white_black',
@@ -36,7 +37,7 @@ const form = reactive({
   fps: 30,
   render_mode: 'balanced',
   bgm_enabled: true,
-  bgm_volume: 0.08,
+  bgm_volume: 0.07,
   novel_alias: '',
   watermark_enabled: true,
   watermark_type: 'text',
@@ -109,6 +110,7 @@ const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
+const clipVideoEnabled = reactive({})
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -120,11 +122,97 @@ const sortedJobs = computed(() => {
 
 const effectiveSegmentGroups = computed(() => {
   if (!segmentPreview.total_segments) return 0
+  const parsed = parseSegmentGroupsRange(form.segment_groups_range, segmentPreview.total_segments)
+  if (parsed.valid && parsed.indexes.length) {
+    return parsed.indexes.length
+  }
   if (form.max_segment_groups > 0) {
     return Math.min(segmentPreview.total_segments, form.max_segment_groups)
   }
   return segmentPreview.total_segments
 })
+
+function parseSegmentGroupsRange(value, totalSegments = 0) {
+  const text = String(value || '').trim()
+  if (!text) {
+    return { valid: true, indexes: [] }
+  }
+
+  const normalized = text
+    .replaceAll('，', ',')
+    .replaceAll('；', ',')
+    .replaceAll(';', ',')
+    .replaceAll('～', '-')
+    .replaceAll('~', '-')
+    .replaceAll('—', '-')
+    .replaceAll('–', '-')
+    .replaceAll('到', '-')
+
+  const parts = normalized
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  if (!parts.length) {
+    return { valid: true, indexes: [] }
+  }
+
+  const indexes = []
+  const seen = new Set()
+  const singleTokenMode = parts.length === 1
+  for (const part of parts) {
+    let start = 0
+    let end = 0
+    if (singleTokenMode && /^-?\d+$/.test(part)) {
+      const value = Number(part)
+      if (!Number.isFinite(value)) {
+        return { valid: false, indexes: [], error: part }
+      }
+      if (value <= 0) {
+        if (totalSegments > 0) {
+          for (let number = 1; number <= totalSegments; number += 1) {
+            if (seen.has(number)) continue
+            seen.add(number)
+            indexes.push(number)
+          }
+        }
+        continue
+      }
+      start = 1
+      end = value
+    } else if (/^\d+$/.test(part)) {
+      if (singleTokenMode) {
+        start = 1
+        end = Number(part)
+      } else {
+        start = Number(part)
+        end = Number(part)
+      }
+    } else {
+      const matched = part.match(/^(\d+)\s*-\s*(\d+)$/)
+      if (!matched) {
+        return { valid: false, indexes: [], error: part }
+      }
+      start = Number(matched[1])
+      end = Number(matched[2])
+    }
+
+    if (!Number.isFinite(start) || !Number.isFinite(end) || start <= 0 || end <= 0) {
+      return { valid: false, indexes: [], error: part }
+    }
+
+    const lo = Math.min(start, end)
+    const hi = Math.max(start, end)
+    for (let number = lo; number <= hi; number += 1) {
+      if (totalSegments > 0 && number > totalSegments) break
+      if (seen.has(number)) continue
+      seen.add(number)
+      indexes.push(number)
+    }
+  }
+
+  return { valid: true, indexes }
+}
 
 const filteredModels = computed(() => {
   const keyword = modelFilterKeyword.value.trim().toLowerCase()
@@ -143,6 +231,8 @@ const refPicker = reactive({
 const bgmPicker = reactive({
   visible: false
 })
+
+const SEGMENT_REDUCE_ALERT_THRESHOLD = 120
 
 const generatingRef = reactive({})
 const characterKeyMap = new WeakMap()
@@ -525,6 +615,39 @@ function syncJobViewFromRecord(record) {
   job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
 }
 
+function resetClipVideoEnabledForJob(jobId) {
+  const id = String(jobId || '').trim()
+  if (!id) return
+  const prefix = `${id}:`
+  Object.keys(clipVideoEnabled).forEach((key) => {
+    if (key.startsWith(prefix)) {
+      delete clipVideoEnabled[key]
+    }
+  })
+}
+
+function clipVideoKey(index) {
+  return `${String(job.id || '')}:${Number(index)}`
+}
+
+function isClipVideoEnabled(index) {
+  return !!clipVideoEnabled[clipVideoKey(index)]
+}
+
+function enableClipVideo(index) {
+  clipVideoEnabled[clipVideoKey(index)] = true
+}
+
+function getClipThumbnailUrl(index) {
+  if (!job.id) return ''
+  return api.getClipThumbnailUrl(job.id, Number(index))
+}
+
+function getClipVideoUrl(index) {
+  if (!job.id) return ''
+  return api.getClipUrl(job.id, Number(index))
+}
+
 function normalizeRuntimeUrl(raw) {
   const value = String(raw || '').trim()
   if (!value) return ''
@@ -547,6 +670,7 @@ function normalizeRuntimeUrl(raw) {
 function selectJob(jobId) {
   const id = String(jobId || '')
   if (!id) return
+  resetClipVideoEnabledForJob(id)
   activeJobId.value = id
   const found = jobs.value.find((item) => item.id === id)
   if (found) {
@@ -574,6 +698,52 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     syncJobViewFromRecord(next)
   }
   return next
+}
+
+async function forceRefreshJobStatus(jobId, options = {}) {
+  const id = String(jobId || '').trim()
+  const { silent = false } = options
+  if (!id) return null
+  try {
+    const status = await api.getJob(id)
+    return syncActiveJobRecordFromApiStatus(id, status)
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.statusFailed', { error: error.message }))
+    }
+    return null
+  }
+}
+
+async function syncJobsFromBackend(options = {}) {
+  const { activateLatest = false } = options
+  try {
+    const data = await api.listJobs(120)
+    const serverJobs = Array.isArray(data?.jobs) ? data.jobs : []
+    serverJobs.forEach((item) => {
+      const id = String(item?.job_id || item?.id || '').trim()
+      if (!id) return
+      syncActiveJobRecordFromApiStatus(id, item)
+    })
+
+    if (!activeJobId.value && activateLatest && jobs.value.length) {
+      const first = sortedJobs.value[0]
+      if (first?.id) {
+        selectJob(first.id)
+      }
+    } else if (activeJobId.value) {
+      const current = jobs.value.find((item) => item.id === activeJobId.value)
+      if (current) {
+        syncJobViewFromRecord(current)
+      }
+    }
+
+    persistJobSnapshot()
+    return serverJobs.length
+  } catch (error) {
+    console.warn('[jobs] sync from backend failed:', error)
+    return 0
+  }
 }
 
 function persistJobSnapshot() {
@@ -819,7 +989,10 @@ async function pollJobsOnce() {
   if (pollingBusy) return
   const ids = jobs.value.map((item) => String(item.id || '')).filter(Boolean)
   if (!ids.length) {
-    stopPolling()
+    const synced = await syncJobsFromBackend({ activateLatest: true })
+    if (!synced || !jobs.value.length) {
+      stopPolling()
+    }
     return
   }
 
@@ -874,6 +1047,36 @@ async function runGenerate() {
     return
   }
 
+  const segmentRangeCheck = parseSegmentGroupsRange(form.segment_groups_range)
+  if (!segmentRangeCheck.valid) {
+    ElMessage.warning(t('toast.segmentRangeInvalid'))
+    return
+  }
+
+  const effectiveSegments = Math.max(0, Number(effectiveSegmentGroups.value || 0))
+  if (effectiveSegments > SEGMENT_REDUCE_ALERT_THRESHOLD) {
+    try {
+      await ElMessageBox.confirm(
+        t('dialog.tooManySegmentsMessage', {
+          count: effectiveSegments,
+          limit: SEGMENT_REDUCE_ALERT_THRESHOLD
+        }),
+        t('dialog.tipTitle'),
+        {
+          confirmButtonText: t('dialog.tooManySegmentsContinue'),
+          cancelButtonText: t('dialog.tooManySegmentsReduce'),
+          type: 'warning',
+          distinguishCancelAndClose: true
+        }
+      )
+    } catch (action) {
+      if (action === 'cancel') {
+        return
+      }
+      return
+    }
+  }
+
   if (!String(form.novel_alias || '').trim()) {
     try {
       await ElMessageBox.confirm(t('dialog.missingAliasMessage'), t('dialog.tipTitle'), {
@@ -906,6 +1109,7 @@ async function runGenerate() {
         : null,
       sentences_per_segment: form.sentences_per_segment,
       max_segment_groups: form.max_segment_groups,
+      segment_groups_range: String(form.segment_groups_range || '').trim() || null,
       resolution: form.resolution,
       subtitle_style: form.subtitle_style,
       camera_motion: form.camera_motion,
@@ -966,8 +1170,8 @@ async function resumeCurrentJob() {
   try {
     await api.resumeJob(activeJobId.value)
     ElMessage.success(t('toast.resumeRequested'))
-    const status = await api.getJob(activeJobId.value)
-    syncActiveJobRecordFromApiStatus(activeJobId.value, status)
+    await forceRefreshJobStatus(activeJobId.value, { silent: true })
+    await syncJobsFromBackend()
     startPolling()
   } catch (error) {
     ElMessage.error(t('toast.resumeFailed', { error: error.message }))
@@ -1203,8 +1407,11 @@ async function recoverJobById() {
     return
   }
   try {
-    const status = await api.getJob(id)
-    syncActiveJobRecordFromApiStatus(id, status)
+    const updated = await forceRefreshJobStatus(id, { silent: true })
+    if (!updated) {
+      throw new Error('job not found')
+    }
+    await syncJobsFromBackend({ activateLatest: true })
     selectJob(id)
     recoverJobIdInput.value = ''
     persistJobSnapshot()
@@ -1215,8 +1422,9 @@ async function recoverJobById() {
   }
 }
 
-function openJob(jobId) {
+async function openJob(jobId) {
   selectJob(jobId)
+  await forceRefreshJobStatus(jobId, { silent: true })
   persistJobSnapshot()
 }
 
@@ -1256,6 +1464,7 @@ onMounted(async () => {
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
   await loadBgmStatus()
+  await syncJobsFromBackend({ activateLatest: true })
   if (jobs.value.length) {
     startPolling()
   }
@@ -1325,8 +1534,12 @@ onUnmounted(() => {
         </div>
 
         <div>
-          <label>{{ t('field.maxSegmentGroups') }}（{{ t('field.maxSegmentHelp') }}）</label>
-          <el-input-number v-model="form.max_segment_groups" :min="0" :max="10000" />
+          <label>{{ t('field.maxSegmentGroups') }}（{{ t('field.segmentGroupsRangeHelp') }}）</label>
+          <el-input
+            v-model="form.segment_groups_range"
+            :placeholder="t('placeholder.segmentGroupsRange')"
+            clearable
+          />
         </div>
 
         <div>
@@ -1473,21 +1686,17 @@ onUnmounted(() => {
           />
           {{ t('action.uploadWatermark') }}
         </label>
-      </div>
-      <div class="grid">
-        <div>
-          <label>{{ t('field.watermarkOpacityLabel') }}</label>
-          <el-slider
-            v-model="form.watermark_opacity"
-            :min="0.05"
-            :max="1"
-            :step="0.01"
-            :disabled="!form.watermark_enabled"
-            show-input
-            :show-input-controls="false"
-            input-size="small"
-          />
-        </div>
+        <span>{{ t('field.watermarkOpacityLabel') }}</span>
+        <el-input-number
+          v-model="form.watermark_opacity"
+          :min="0.05"
+          :max="1"
+          :step="0.01"
+          :precision="2"
+          :controls="false"
+          :disabled="!form.watermark_enabled"
+          style="width: 110px"
+        />
       </div>
       <div class="muted bgm-status" v-if="form.watermark_image_path">
         <span>{{ t('hint.watermarkImageSelected', { filename: form.watermark_image_path.split('/').pop() }) }}</span>
@@ -1644,8 +1853,14 @@ onUnmounted(() => {
     <section class="card">
       <h2>{{ t('section.jobRecovery') }}</h2>
       <div class="job-restore-row">
-        <el-input v-model="recoverJobIdInput" :placeholder="t('placeholder.recoverJobId')" clearable style="max-width: 360px" />
-        <el-button @click="recoverJobById">{{ t('action.recoverJob') }}</el-button>
+        <el-input
+          v-model="recoverJobIdInput"
+          :placeholder="t('placeholder.recoverJobId')"
+          clearable
+          style="max-width: 360px"
+          @keyup.enter.prevent="recoverJobById"
+        />
+        <el-button native-type="button" @click="recoverJobById">{{ t('action.recoverJob') }}</el-button>
       </div>
     </section>
 
@@ -1692,9 +1907,27 @@ onUnmounted(() => {
       </div>
 
       <div v-if="job.clipPreviewUrls.length" class="clip-grid">
-        <div v-for="(url, index) in job.clipPreviewUrls" :key="index" class="clip-item">
+        <div v-for="(url, index) in job.clipPreviewUrls" :key="`${job.id}-${index}`" class="clip-item">
           <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
-          <video :src="url" controls preload="metadata" class="video" />
+          <div
+            v-if="!isClipVideoEnabled(index)"
+            class="clip-thumb-wrap"
+            role="button"
+            tabindex="0"
+            @click="enableClipVideo(index)"
+            @keydown.enter.prevent="enableClipVideo(index)"
+          >
+            <img :src="getClipThumbnailUrl(index)" class="video clip-thumb" loading="lazy" alt="clip thumbnail" />
+            <div class="clip-thumb-play">▶</div>
+          </div>
+          <video
+            v-else
+            :src="getClipVideoUrl(index)"
+            :poster="getClipThumbnailUrl(index)"
+            controls
+            preload="none"
+            class="video"
+          />
         </div>
       </div>
 

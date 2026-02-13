@@ -89,7 +89,8 @@ class GenerateVideoRequest(BaseModel):
     segment_request_signature: str | None = None
     precomputed_segments: list[str] | None = None
     sentences_per_segment: int = Field(default=5, ge=1, le=50)
-    max_segment_groups: int = Field(default=0, ge=0, le=10000)
+    max_segment_groups: int = Field(default=0, le=10000)
+    segment_groups_range: str | None = None
     resolution: str = "1920x1080"
     image_aspect_ratio: str | None = None
     subtitle_style: Literal[
@@ -104,7 +105,7 @@ class GenerateVideoRequest(BaseModel):
     camera_motion: Literal["vertical", "horizontal", "auto"] = "vertical"
     fps: int = Field(default=30, ge=15, le=60)
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.07, ge=0.0, le=1.0)
     novel_alias: str | None = None
     watermark_enabled: bool = True
     watermark_type: Literal["text", "image"] = "text"
@@ -124,7 +125,7 @@ class GenerateVideoResponse(BaseModel):
 
 class RemixBgmRequest(BaseModel):
     bgm_enabled: bool = True
-    bgm_volume: float = Field(default=0.08, ge=0.0, le=1.0)
+    bgm_volume: float = Field(default=0.07, ge=0.0, le=1.0)
     fps: int | None = Field(default=None, ge=15, le=60)
     novel_alias: str | None = None
     watermark_enabled: bool = True

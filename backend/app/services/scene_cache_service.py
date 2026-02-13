@@ -834,6 +834,7 @@ async def _llm_match_candidate(
     target_profile: dict,
     candidates: list[dict],
     model_id: str | None,
+    strict: bool = True,
 ) -> tuple[str | None, str]:
     if not settings.llm_api_key or not candidates:
         return None, "llm disabled or no candidates"
@@ -943,8 +944,16 @@ async def _llm_match_candidate(
     target_has_location = bool(_normalize_text(target_profile.get("location_hint", "")))
     selected_has_location = bool(candidate_location_map.get(str(selected_id), ""))
     require_location_match = target_has_location and selected_has_location
-    if not character_match or not action_match or not scene_match or (require_location_match and not location_match):
-        return None, reason or "llm strict checks failed"
+    if strict:
+        if not character_match or not action_match or not scene_match or (require_location_match and not location_match):
+            return None, reason or "llm strict checks failed"
+    else:
+        if not character_match:
+            return None, reason or "llm fallback strict checks failed"
+        if not (action_match or scene_match):
+            return None, reason or "llm fallback semantic checks failed"
+        if require_location_match and not location_match and not scene_match:
+            return None, reason or "llm fallback location checks failed"
     return str(selected_id), reason or "llm matched"
 
 
@@ -1083,7 +1092,7 @@ async def find_reusable_scene_image(
     if int(best_precheck.get("scene_common", 0)) < 2 and int(best_precheck.get("scene_element_common", 0)) < 1:
         return None
 
-    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id)
+    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id, strict=True)
     if selected_id:
         selected = next((item for item in top if str(item.get("id")) == selected_id), None)
         if selected:
@@ -1205,7 +1214,7 @@ async def force_llm_select_scene_image(
     if _profile_reference_image_ids(target_profile) or _profile_reference_image_paths(target_profile):
         top_limit = min(200, max(20, len(candidates)))
     top = sorted(candidates, key=lambda item: int(item.get("llm_rank", 0)), reverse=True)[:top_limit]
-    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id)
+    selected_id, reason = await _llm_match_candidate(target_profile, top, model_id=model_id, strict=False)
     if not selected_id:
         return None
 

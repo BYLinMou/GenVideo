@@ -87,7 +87,8 @@ Legacy init/planning prompts have been removed.
 
 - Prefer minimal, targeted changes.
 - Keep frontend strings in i18n when possible.
+- All new frontend user-facing text must use i18n keys (no hardcoded UI strings).
+- Use English for all Git commit messages/titles.
 - Use conservative fallback behavior:
   - If uncertain in reuse/match logic, choose safer non-reuse path.
 - Do not reintroduce legacy planning/init prompt content into this file.
-
