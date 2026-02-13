@@ -1686,21 +1686,17 @@ onUnmounted(() => {
           />
           {{ t('action.uploadWatermark') }}
         </label>
-      </div>
-      <div class="grid">
-        <div>
-          <label>{{ t('field.watermarkOpacityLabel') }}</label>
-          <el-slider
-            v-model="form.watermark_opacity"
-            :min="0.05"
-            :max="1"
-            :step="0.01"
-            :disabled="!form.watermark_enabled"
-            show-input
-            :show-input-controls="false"
-            input-size="small"
-          />
-        </div>
+        <span>{{ t('field.watermarkOpacityLabel') }}</span>
+        <el-input-number
+          v-model="form.watermark_opacity"
+          :min="0.05"
+          :max="1"
+          :step="0.01"
+          :precision="2"
+          :controls="false"
+          :disabled="!form.watermark_enabled"
+          style="width: 110px"
+        />
       </div>
       <div class="muted bgm-status" v-if="form.watermark_image_path">
         <span>{{ t('hint.watermarkImageSelected', { filename: form.watermark_image_path.split('/').pop() }) }}</span>
