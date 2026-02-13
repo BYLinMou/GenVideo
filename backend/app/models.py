@@ -210,3 +210,11 @@ class FinalVideoItem(BaseModel):
 class FinalVideoListResponse(BaseModel):
     videos: list[FinalVideoItem]
 
+
+class WorkspaceAuthStatusResponse(BaseModel):
+    required: bool
+
+
+class WorkspaceLoginRequest(BaseModel):
+    password: str
+

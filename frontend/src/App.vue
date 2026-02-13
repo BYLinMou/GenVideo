@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { api } from './api'
+import { WORKSPACE_AUTH_REQUIRED_EVENT, api } from './api'
 import { t } from './i18n'
 
 const models = ref([])
@@ -28,6 +28,12 @@ const PAGE_WORKSPACE = 'workspace'
 const PAGE_FINAL_VIDEOS = 'final-videos'
 const activePage = ref(PAGE_WORKSPACE)
 const finalVideos = ref([])
+const workspaceAuthRequired = ref(false)
+const workspaceUnlocked = ref(true)
+const workspaceAuthLoading = ref(false)
+const workspacePasswordInput = ref('')
+const workspaceAuthError = ref('')
+const workspaceDataBootstrapped = ref(false)
 
 const form = reactive({
   text: '',
@@ -97,6 +103,10 @@ const sceneProgressText = computed(() => {
   const current = Math.max(0, Number(job.currentSegment || 0))
   if (!total) return t('hint.sceneNotStarted')
   return t('hint.sceneProgress', { current: Math.min(current, total), total })
+})
+
+const workspaceLocked = computed(() => {
+  return workspaceAuthRequired.value && !workspaceUnlocked.value
 })
 
 const imageSourceSummary = computed(() => {
@@ -763,6 +773,94 @@ async function loadFinalVideos(options = {}) {
   }
 }
 
+function setWorkspaceLockedState() {
+  workspaceUnlocked.value = false
+  workspacePasswordInput.value = ''
+  stopPolling()
+}
+
+async function refreshWorkspaceAuthStatus(options = {}) {
+  const { silent = false } = options
+  try {
+    const data = await api.getWorkspaceAuthStatus()
+    workspaceAuthRequired.value = !!data?.required
+    workspaceAuthError.value = ''
+
+    if (!workspaceAuthRequired.value) {
+      workspaceUnlocked.value = true
+      return true
+    }
+
+    const savedPassword = String(api.getWorkspacePassword() || '')
+    if (!savedPassword) {
+      setWorkspaceLockedState()
+      return false
+    }
+
+    try {
+      await api.loginWorkspace(savedPassword)
+      workspaceUnlocked.value = true
+      return true
+    } catch {
+      api.clearWorkspacePassword()
+      setWorkspaceLockedState()
+      if (!silent) {
+        workspaceAuthError.value = t('toast.workspacePasswordInvalid')
+      }
+      return false
+    }
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.workspaceAuthStatusFailed', { error: error.message }))
+    }
+    setWorkspaceLockedState()
+    return false
+  }
+}
+
+async function bootstrapWorkspaceData() {
+  if (workspaceDataBootstrapped.value) return
+  restoreJobSnapshot()
+  await Promise.all([loadModels(), loadVoices(), loadRefImages()])
+  await loadBgmLibrary()
+  await loadBgmStatus()
+  await syncJobsFromBackend({ activateLatest: true })
+  if (jobs.value.length) {
+    startPolling()
+  }
+  workspaceDataBootstrapped.value = true
+}
+
+async function submitWorkspacePassword() {
+  const password = String(workspacePasswordInput.value || '')
+  if (!password) {
+    workspaceAuthError.value = t('toast.workspacePasswordRequired')
+    return
+  }
+
+  workspaceAuthLoading.value = true
+  workspaceAuthError.value = ''
+  try {
+    await api.loginWorkspace(password)
+    workspaceUnlocked.value = true
+    workspacePasswordInput.value = ''
+    await bootstrapWorkspaceData()
+  } catch (error) {
+    api.clearWorkspacePassword()
+    setWorkspaceLockedState()
+    workspaceAuthError.value = t('toast.workspaceLoginFailed', { error: error.message })
+  } finally {
+    workspaceAuthLoading.value = false
+  }
+}
+
+function handleWorkspaceAuthRequired() {
+  if (!workspaceAuthRequired.value) return
+  api.clearWorkspacePassword()
+  setWorkspaceLockedState()
+  workspaceAuthError.value = t('toast.workspaceSessionExpired')
+}
+
 function formatDateTime(value) {
   const text = String(value || '').trim()
   if (!text) return '-'
@@ -775,8 +873,16 @@ async function switchPage(page) {
   const next = page === PAGE_FINAL_VIDEOS ? PAGE_FINAL_VIDEOS : PAGE_WORKSPACE
   activePage.value = next
   setPagePath(next)
-  if (next === PAGE_FINAL_VIDEOS && !finalVideos.value.length) {
-    await loadFinalVideos()
+  if (next === PAGE_FINAL_VIDEOS) {
+    if (!finalVideos.value.length) {
+      await loadFinalVideos()
+    }
+    return
+  }
+
+  const ok = await refreshWorkspaceAuthStatus({ silent: true })
+  if (ok) {
+    await bootstrapWorkspaceData()
   }
 }
 
@@ -785,6 +891,11 @@ async function handleLocationChange() {
   activePage.value = next
   if (next === PAGE_FINAL_VIDEOS) {
     await loadFinalVideos({ silent: true })
+    return
+  }
+  const ok = await refreshWorkspaceAuthStatus({ silent: true })
+  if (ok) {
+    await bootstrapWorkspaceData()
   }
 }
 
@@ -1588,14 +1699,13 @@ onMounted(async () => {
     activePage.value = resolvePageFromPath()
     setPagePath(activePage.value, { replace: true })
     window.addEventListener('popstate', handleLocationChange)
+    window.addEventListener(WORKSPACE_AUTH_REQUIRED_EVENT, handleWorkspaceAuthRequired)
   }
-  restoreJobSnapshot()
-  await Promise.all([loadModels(), loadVoices(), loadRefImages()])
-  await loadBgmLibrary()
-  await loadBgmStatus()
-  await syncJobsFromBackend({ activateLatest: true })
-  if (jobs.value.length) {
-    startPolling()
+
+  const workspaceReady = await refreshWorkspaceAuthStatus({ silent: true })
+
+  if (activePage.value === PAGE_WORKSPACE && workspaceReady) {
+    await bootstrapWorkspaceData()
   }
   if (activePage.value === PAGE_FINAL_VIDEOS) {
     await loadFinalVideos({ silent: true })
@@ -1606,6 +1716,7 @@ onUnmounted(() => {
   stopPolling()
   if (typeof window !== 'undefined') {
     window.removeEventListener('popstate', handleLocationChange)
+    window.removeEventListener(WORKSPACE_AUTH_REQUIRED_EVENT, handleWorkspaceAuthRequired)
   }
 })
 </script>
@@ -1627,6 +1738,27 @@ onUnmounted(() => {
     </div>
 
     <template v-if="activePage === PAGE_WORKSPACE">
+    <template v-if="workspaceLocked">
+      <section class="card">
+        <h2>{{ t('section.workspaceAuth') }}</h2>
+        <p class="muted">{{ t('hint.workspaceLocked') }}</p>
+        <div class="job-restore-row">
+          <el-input
+            v-model="workspacePasswordInput"
+            :placeholder="t('placeholder.workspacePassword')"
+            show-password
+            style="max-width: 360px"
+            @keyup.enter.prevent="submitWorkspacePassword"
+          />
+          <el-button type="primary" :loading="workspaceAuthLoading" @click="submitWorkspacePassword">
+            {{ t('action.workspaceLogin') }}
+          </el-button>
+        </div>
+        <p v-if="workspaceAuthError" class="muted">{{ workspaceAuthError }}</p>
+      </section>
+    </template>
+
+    <template v-else>
 
     <section class="card">
       <h2>{{ t('section.config') }}</h2>
@@ -2108,6 +2240,7 @@ onUnmounted(() => {
       <pre class="logs">{{ backendLogs.join('\n') }}</pre>
     </section>
 
+    </template>
     </template>
 
     <template v-else>

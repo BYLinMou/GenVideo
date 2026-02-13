@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hmac
 import logging
 from datetime import datetime
 import shutil
@@ -39,6 +40,8 @@ from .models import (
     SegmentItem,
     SegmentTextRequest,
     SegmentTextResponse,
+    WorkspaceAuthStatusResponse,
+    WorkspaceLoginRequest,
 )
 from .services.character_assets_service import (
     create_character_reference_image,
@@ -97,6 +100,43 @@ app.mount(
     StaticFiles(directory=project_path("assets/bgm")),
     name="bgm_assets",
 )
+
+
+def _workspace_password_required() -> bool:
+    return bool((settings.admin_password or "").strip())
+
+
+def _workspace_password_valid(provided: str | None) -> bool:
+    expected = (settings.admin_password or "").strip()
+    if not expected:
+        return True
+    current = str(provided or "")
+    return hmac.compare_digest(current, expected)
+
+
+def _is_public_api_path(path: str) -> bool:
+    normalized = str(path or "").strip()
+    if not normalized.startswith("/api/"):
+        return True
+    public_prefixes = (
+        "/api/health",
+        "/api/workspace-auth",
+        "/api/final-videos",
+    )
+    return any(normalized == prefix or normalized.startswith(f"{prefix}/") for prefix in public_prefixes)
+
+
+@app.middleware("http")
+async def workspace_auth_middleware(request: Request, call_next):
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
+    if not _workspace_password_required() or _is_public_api_path(request.url.path):
+        return await call_next(request)
+
+    if not _workspace_password_valid(request.headers.get("x-workspace-password")):
+        return JSONResponse(status_code=401, content={"detail": "workspace authentication required"})
+    return await call_next(request)
 
 
 def _bgm_root() -> Path:
@@ -302,6 +342,20 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/api/workspace-auth/status", response_model=WorkspaceAuthStatusResponse)
+async def workspace_auth_status() -> WorkspaceAuthStatusResponse:
+    return WorkspaceAuthStatusResponse(required=_workspace_password_required())
+
+
+@app.post("/api/workspace-auth/login")
+async def workspace_auth_login(payload: WorkspaceLoginRequest) -> dict:
+    if not _workspace_password_required():
+        return {"ok": True}
+    if not _workspace_password_valid(payload.password):
+        raise HTTPException(status_code=401, detail="invalid workspace password")
+    return {"ok": True}
 
 
 @app.get("/api/logs/tail")

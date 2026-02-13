@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     log_dir: str = Field(default="logs", alias="LOG_DIR")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     cors_allow_origins: str = Field(default="*", alias="CORS_ALLOW_ORIGINS")
+    admin_password: str = Field(default="", alias="ADMIN_PASSWORD")
 
 
 settings = Settings()

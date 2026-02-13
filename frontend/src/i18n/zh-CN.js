@@ -267,4 +267,28 @@ Object.assign(zhCN.toast, {
   finalVideosLoadFailed: '加载最终视频列表失败：{error}'
 })
 
+Object.assign(zhCN.section, {
+  workspaceAuth: '工作台访问验证'
+})
+
+Object.assign(zhCN.action, {
+  workspaceLogin: '进入工作台'
+})
+
+Object.assign(zhCN.placeholder, {
+  workspacePassword: '请输入工作台密码'
+})
+
+Object.assign(zhCN.hint, {
+  workspaceLocked: '已启用工作台密码保护。请输入密码后再加载工作台数据。'
+})
+
+Object.assign(zhCN.toast, {
+  workspacePasswordRequired: '请输入工作台密码',
+  workspacePasswordInvalid: '缓存密码无效，请重新输入',
+  workspaceLoginFailed: '工作台登录失败：{error}',
+  workspaceAuthStatusFailed: '获取工作台鉴权状态失败：{error}',
+  workspaceSessionExpired: '工作台登录已失效，请重新输入密码'
+})
+
 export default zhCN

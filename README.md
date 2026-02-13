@@ -74,6 +74,8 @@ Default: `http://localhost:8000`
 ### Key APIs
 
 - `GET /api/health`
+- `GET /api/workspace-auth/status`
+- `POST /api/workspace-auth/login`
 - `GET /api/models`
 - `GET /api/tts/voices`
 - `GET /api/logs/tail?lines=200`
@@ -124,6 +126,11 @@ Final videos library behavior:
 ## Environment
 
 See `.env.example`.
+
+Workspace auth gate:
+
+- `ADMIN_PASSWORD` (optional): when set, workspace APIs require header `x-workspace-password`
+- Public final videos endpoints remain open: `/api/final-videos/*`
 
 Important paths:
 
