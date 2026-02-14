@@ -420,6 +420,14 @@ def _normalize_scene_metadata(raw: dict | None) -> dict:
     mood = _clean_text(str(payload.get("mood", "")), 80)
     shot_type = _clean_text(str(payload.get("shot_type", "")), 80)
 
+    raw_scene_only = payload.get("is_scene_only", False)
+    if isinstance(raw_scene_only, bool):
+        is_scene_only = raw_scene_only
+    elif isinstance(raw_scene_only, (int, float)):
+        is_scene_only = bool(raw_scene_only)
+    else:
+        is_scene_only = str(raw_scene_only or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
     return {
         "action_hint": action_hint,
         "location_hint": location_hint,
@@ -428,6 +436,7 @@ def _normalize_scene_metadata(raw: dict | None) -> dict:
         "location_keywords": location_keywords,
         "mood": mood,
         "shot_type": shot_type,
+        "is_scene_only": is_scene_only,
     }
 
 
@@ -470,6 +479,7 @@ def _fallback_scene_metadata(segment_text: str, image_prompt: str) -> dict:
             "location_keywords": [location_hint] if location_hint else [],
             "mood": "",
             "shot_type": "",
+            "is_scene_only": False,
         }
     )
 
@@ -668,6 +678,7 @@ async def build_segment_image_bundle(
             "location_keywords": [""],
             "mood": "",
             "shot_type": "",
+            "is_scene_only": False,
         },
     }
     payload = {

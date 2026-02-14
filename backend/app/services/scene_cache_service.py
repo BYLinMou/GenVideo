@@ -50,7 +50,8 @@ def _ensure_db_schema(conn: sqlite3.Connection) -> None:
             match_profile_json TEXT NOT NULL,
             primary_ref_image_id TEXT NOT NULL DEFAULT '',
             reference_image_path TEXT NOT NULL,
-            character_name TEXT NOT NULL
+            character_name TEXT NOT NULL,
+            is_scene_only INTEGER NOT NULL DEFAULT 0
         )
         """
     )
@@ -71,12 +72,15 @@ def _ensure_db_schema(conn: sqlite3.Connection) -> None:
     entry_cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(scene_entries)").fetchall()}
     if "primary_ref_image_id" not in entry_cols:
         conn.execute("ALTER TABLE scene_entries ADD COLUMN primary_ref_image_id TEXT NOT NULL DEFAULT ''")
+    if "is_scene_only" not in entry_cols:
+        conn.execute("ALTER TABLE scene_entries ADD COLUMN is_scene_only INTEGER NOT NULL DEFAULT 0")
 
     binding_cols = {str(row[1]) for row in conn.execute("PRAGMA table_info(scene_entry_ref_bindings)").fetchall()}
     if "ref_image_id" not in binding_cols:
         conn.execute("ALTER TABLE scene_entry_ref_bindings ADD COLUMN ref_image_id TEXT NOT NULL DEFAULT ''")
 
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_entries_primary_ref_id ON scene_entries(primary_ref_image_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_entries_scene_only ON scene_entries(is_scene_only)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_ref_bindings_ref_path ON scene_entry_ref_bindings(ref_path)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_scene_ref_bindings_ref_id ON scene_entry_ref_bindings(ref_image_id)")
     conn.commit()
@@ -126,7 +130,7 @@ def _profile_reference_image_ids(payload: dict) -> list[str]:
     return [item for item in _normalize_reference_image_ids(derived_ids) if item]
 
 
-def _entry_to_db_tuple(entry: dict) -> tuple[str, str, str, str, str, str, str, str, str]:
+def _entry_to_db_tuple(entry: dict) -> tuple[str, str, str, str, str, str, str, str, str, int]:
     descriptor = entry.get("descriptor") or {}
     profile = entry.get("match_profile") or {}
     ref_paths = _profile_reference_image_paths(profile) or _profile_reference_image_paths(descriptor)
@@ -134,6 +138,7 @@ def _entry_to_db_tuple(entry: dict) -> tuple[str, str, str, str, str, str, str, 
     ref_ids = _profile_reference_image_ids(profile) or _profile_reference_image_ids(descriptor)
     primary_ref_image_id = ref_ids[0] if ref_ids else _ref_image_id_from_path(ref_path)
     char_name = _normalize_text(str((descriptor.get("character_name") or profile.get("character_name") or "")))
+    scene_only = 1 if _as_bool(descriptor.get("is_scene_only", profile.get("is_scene_only", False))) else 0
     return (
         str(entry.get("id") or uuid4().hex),
         str(entry.get("created_at") or datetime.now(timezone.utc).isoformat()),
@@ -144,6 +149,7 @@ def _entry_to_db_tuple(entry: dict) -> tuple[str, str, str, str, str, str, str, 
         primary_ref_image_id,
         ref_path,
         char_name,
+        scene_only,
     )
 
 
@@ -221,8 +227,8 @@ def _insert_entry_to_db(conn: sqlite3.Connection, entry: dict) -> None:
     conn.execute(
         """
         INSERT OR REPLACE INTO scene_entries(
-            id, created_at, image_path, prompt, descriptor_json, match_profile_json, primary_ref_image_id, reference_image_path, character_name
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, created_at, image_path, prompt, descriptor_json, match_profile_json, primary_ref_image_id, reference_image_path, character_name, is_scene_only
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         _entry_to_db_tuple(entry),
     )
@@ -403,6 +409,17 @@ def _normalize_text(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = _normalize_text(str(value or "")).lower()
+    if not text:
+        return False
+    return text in {"1", "true", "yes", "y", "on"}
+
+
 def _normalize_path_text(path: str) -> str:
     value = _normalize_text(path)
     if not value:
@@ -513,6 +530,11 @@ def _normalize_scene_descriptor(descriptor: dict) -> dict:
     location_keywords = _normalize_list(descriptor.get("location_keywords") or [], 8)
     mood = _normalize_text(str(descriptor.get("mood", "")))[:80]
     shot_type = _normalize_text(str(descriptor.get("shot_type", "")))[:80]
+    is_scene_only = _as_bool(descriptor.get("is_scene_only", False))
+
+    if is_scene_only:
+        character_name = ""
+        character_role = ""
 
     return {
         "character_name": character_name,
@@ -528,6 +550,7 @@ def _normalize_scene_descriptor(descriptor: dict) -> dict:
         "location_keywords": location_keywords,
         "mood": mood,
         "shot_type": shot_type,
+        "is_scene_only": is_scene_only,
     }
 
 
@@ -569,6 +592,7 @@ def _build_match_profile(descriptor: dict) -> dict:
         "location_keywords": location_keywords,
         "mood": normalized.get("mood", ""),
         "shot_type": normalized.get("shot_type", ""),
+        "is_scene_only": _as_bool(normalized.get("is_scene_only", False)),
         "action_tokens": _tokenize_ordered(
             f"{action_hint} {' '.join(action_keywords)} {segment_text}",
             limit=24,
@@ -625,6 +649,9 @@ def _migrate_entry_schema(entry: dict) -> dict | None:
 
 
 def _character_match(target_profile: dict, candidate_profile: dict) -> bool:
+    if _as_bool(target_profile.get("is_scene_only", False)) and _as_bool(candidate_profile.get("is_scene_only", False)):
+        return True
+
     target_ref_ids = set(_profile_reference_image_ids(target_profile))
     candidate_ref_ids = set(_profile_reference_image_ids(candidate_profile))
     if target_ref_ids and candidate_ref_ids and (target_ref_ids & candidate_ref_ids):
@@ -814,6 +841,7 @@ def build_scene_descriptor(
         "location_keywords": [],
         "mood": "",
         "shot_type": "",
+        "is_scene_only": False,
     }
     if metadata:
         merged = {
@@ -825,6 +853,7 @@ def build_scene_descriptor(
             "location_keywords": metadata.get("location_keywords") or [],
             "mood": _normalize_text(str(metadata.get("mood", "")))[:80],
             "shot_type": _normalize_text(str(metadata.get("shot_type", "")))[:80],
+            "is_scene_only": _as_bool(metadata.get("is_scene_only", False)),
         }
         return _normalize_scene_descriptor(merged)
     return _normalize_scene_descriptor(base)
@@ -848,6 +877,7 @@ async def _llm_match_candidate(
             "character_name": target_profile.get("character_name", ""),
             "character_role": target_profile.get("character_role", ""),
             "character_key": target_profile.get("character_key", ""),
+            "is_scene_only": _as_bool(target_profile.get("is_scene_only", False)),
             "reference_image_paths": target_profile.get("reference_image_paths", []),
             "reference_image_ids": target_profile.get("reference_image_ids", []),
             "action_hint": target_profile.get("action_hint", ""),
@@ -861,6 +891,7 @@ async def _llm_match_candidate(
                 "character_name": ((item.get("match_profile") or {}).get("character_name") or ""),
                 "character_role": ((item.get("match_profile") or {}).get("character_role") or ""),
                 "character_key": ((item.get("match_profile") or {}).get("character_key") or ""),
+                "is_scene_only": _as_bool((item.get("match_profile") or {}).get("is_scene_only", False)),
                 "reference_image_paths": ((item.get("match_profile") or {}).get("reference_image_paths") or []),
                 "reference_image_ids": ((item.get("match_profile") or {}).get("reference_image_ids") or []),
                 "action_hint": ((item.get("match_profile") or {}).get("action_hint") or ""),
@@ -931,6 +962,10 @@ async def _llm_match_candidate(
         ((item.get("match_profile") or {}) for item in candidates if str(item.get("id")) == str(selected_id)),
         {},
     )
+    target_scene_only = _as_bool(target_profile.get("is_scene_only", False))
+    selected_scene_only = _as_bool(selected_profile.get("is_scene_only", False))
+    scene_only_pair = target_scene_only and selected_scene_only
+
     target_ref_ids = set(_profile_reference_image_ids(target_profile))
     selected_ref_ids = set(_profile_reference_image_ids(selected_profile))
     if target_ref_ids and selected_ref_ids and not (target_ref_ids & selected_ref_ids):
@@ -945,10 +980,10 @@ async def _llm_match_candidate(
     selected_has_location = bool(candidate_location_map.get(str(selected_id), ""))
     require_location_match = target_has_location and selected_has_location
     if strict:
-        if not character_match or not action_match or not scene_match or (require_location_match and not location_match):
+        if (not character_match and not scene_only_pair) or not action_match or not scene_match or (require_location_match and not location_match):
             return None, reason or "llm strict checks failed"
     else:
-        if not character_match:
+        if not character_match and not scene_only_pair:
             return None, reason or "llm fallback strict checks failed"
         if not (action_match or scene_match):
             return None, reason or "llm fallback semantic checks failed"
