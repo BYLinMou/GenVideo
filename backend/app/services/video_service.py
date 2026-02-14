@@ -468,6 +468,82 @@ def _detect_speaker_character(characters: list[CharacterSuggestion], text: str) 
     return best[2] if best else None
 
 
+def _contains_first_person_pronoun(text: str) -> bool:
+    content = str(text or "")
+    if not content:
+        return False
+    narration_only = _strip_quoted_dialogue(content)
+    if not narration_only:
+        return False
+
+    if any(token in narration_only for token in ("我", "我们", "咱", "咱们")):
+        return True
+
+    lowered = narration_only.lower()
+    return bool(re.search(r"\b(i|i'm|i’ve|i'd|me|my|mine|we|our|ours)\b", lowered))
+
+
+def _strip_quoted_dialogue(text: str) -> str:
+    content = str(text or "")
+    if not content:
+        return ""
+
+    quotes = _extract_quote_blocks(content)
+    if not quotes:
+        return content
+
+    slices: list[str] = []
+    cursor = 0
+    for _, start, end in quotes:
+        if start > cursor:
+            slices.append(content[cursor:start])
+        cursor = max(cursor, end + 1)
+
+    if cursor < len(content):
+        slices.append(content[cursor:])
+
+    return " ".join(part.strip() for part in slices if part and part.strip())
+
+
+def _pick_story_self_character(characters: list[CharacterSuggestion]) -> CharacterSuggestion | None:
+    marked = [item for item in characters if bool(getattr(item, "is_story_self", False))]
+    if marked:
+        marked.sort(key=lambda item: int(item.importance or 0), reverse=True)
+        return marked[0]
+
+    mains = [item for item in characters if bool(getattr(item, "is_main_character", False))]
+    if mains:
+        mains.sort(key=lambda item: int(item.importance or 0), reverse=True)
+        return mains[0]
+    return None
+
+
+def _normalize_runtime_identity_flags(characters: list[CharacterSuggestion]) -> list[CharacterSuggestion]:
+    if not characters:
+        return characters
+
+    main_indexes = [index for index, item in enumerate(characters) if bool(item.is_main_character)]
+    self_indexes = [index for index, item in enumerate(characters) if bool(item.is_story_self)]
+
+    if len(main_indexes) > 1:
+        keep = main_indexes[0]
+        for index in main_indexes[1:]:
+            characters[index].is_main_character = False
+        main_indexes = [keep]
+
+    if len(self_indexes) > 1:
+        keep = self_indexes[0]
+        for index in self_indexes[1:]:
+            characters[index].is_story_self = False
+        self_indexes = [keep]
+
+    if not main_indexes:
+        best_index = max(range(len(characters)), key=lambda idx: int(characters[idx].importance or 0))
+        characters[best_index].is_main_character = True
+
+    return characters
+
+
 def _pick_character(
     characters: list[CharacterSuggestion],
     text: str,
@@ -486,6 +562,11 @@ def _pick_character(
     speaker = _detect_speaker_character(characters, current_text)
     if speaker is not None:
         return speaker
+
+    if _contains_first_person_pronoun(current_text):
+        self_character = _pick_story_self_character(characters)
+        if self_character is not None:
+            return self_character
 
     has_dialogue = any(mark in current_text for mark in _DIALOG_QUOTE_PAIRS.keys())
     if has_dialogue and previous_segment_text:
@@ -536,6 +617,11 @@ def _pick_related_characters(
     for _, _, item in current_hits:
         selected.append(item)
 
+    if _contains_first_person_pronoun(normalized_current):
+        self_character = _pick_story_self_character(characters)
+        if self_character is not None:
+            selected.append(self_character)
+
     for item in characters:
         name = (item.name or "").strip()
         if not name:
@@ -555,6 +641,69 @@ def _pick_related_characters(
         seen.add(marker)
         dedup.append(item)
     return dedup
+
+
+def _pick_characters_by_indexes(
+    characters: list[CharacterSuggestion],
+    primary_index: int | None,
+    related_indexes: list[int],
+) -> tuple[CharacterSuggestion | None, list[CharacterSuggestion]]:
+    if not characters:
+        return None, []
+
+    safe_primary = primary_index if isinstance(primary_index, int) and 0 <= primary_index < len(characters) else None
+    selected: list[CharacterSuggestion] = []
+    seen: set[int] = set()
+
+    if safe_primary is not None:
+        selected.append(characters[safe_primary])
+        seen.add(safe_primary)
+
+    for raw in related_indexes:
+        if not isinstance(raw, int):
+            continue
+        if raw < 0 or raw >= len(characters):
+            continue
+        if raw in seen:
+            continue
+        selected.append(characters[raw])
+        seen.add(raw)
+
+    primary_character = characters[safe_primary] if safe_primary is not None else None
+    return primary_character, selected
+
+
+def _coerce_character_index(value: object, size: int) -> int | None:
+    if size <= 0:
+        return None
+    try:
+        index = int(value)
+    except Exception:
+        return None
+    if 0 <= index < size:
+        return index
+    return None
+
+
+def _coerce_character_indexes(values: object, size: int, limit: int = 4) -> list[int]:
+    if isinstance(values, list):
+        raw_items = values
+    elif values is None:
+        raw_items = []
+    else:
+        raw_items = [values]
+
+    output: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_items:
+        index = _coerce_character_index(raw, size)
+        if index is None or index in seen:
+            continue
+        seen.add(index)
+        output.append(index)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
 
 
 def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 2) -> list[str]:
@@ -1701,6 +1850,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         resolution = _parse_resolution(payload.resolution)
         characters = _sanitize_character_voices(list(payload.characters), narrator_voice=_NARRATOR_VOICE_ID)
+        characters = _normalize_runtime_identity_flags(characters)
         story_world_context = await summarize_story_world_context(payload.text, payload.model_id)
         if story_world_context:
             logger.info("Story world context summary: %s", story_world_context)
@@ -1744,22 +1894,36 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             previous_segment_text = segments[index - 1] if index > 0 else ""
             next_segment_text = segments[index + 1] if index + 1 < total else ""
 
-            character = _pick_character(
+            default_character = _pick_character(
                 characters,
                 segment_text,
                 previous_character=previous_primary_character,
                 previous_segment_text=previous_segment_text,
                 next_segment_text=next_segment_text,
             )
-            related_characters = _pick_related_characters(
+            default_related_characters = _pick_related_characters(
                 characters,
                 segment_text,
-                character,
+                default_character,
                 previous_segment_text=previous_segment_text,
                 next_segment_text=next_segment_text,
             )
+            if default_character not in default_related_characters:
+                default_related_characters.insert(0, default_character)
+
+            default_primary_index = next(
+                (idx for idx, item in enumerate(characters) if item is default_character),
+                0,
+            )
+            default_related_indexes = [
+                idx
+                for idx, item in enumerate(characters)
+                if any(item is selected for selected in default_related_characters)
+            ]
+
+            character = default_character
+            related_characters = list(default_related_characters)
             related_reference_paths = _collect_reference_paths(related_characters, limit=2)
-            previous_primary_character = character
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
@@ -1792,6 +1956,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     story_world_context=story_world_context,
                     previous_segment_text=previous_segment_text,
                     next_segment_text=next_segment_text,
+                    character_candidates=characters,
+                    default_primary_index=default_primary_index,
+                    default_related_indexes=default_related_indexes,
                 )
             )
             audio_task = asyncio.create_task(
@@ -1806,6 +1973,38 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             prompt_bundle = await prompt_task
             prompt = str(prompt_bundle.get("prompt") or "").strip()
             scene_metadata = prompt_bundle.get("metadata") or {}
+
+            assignment = prompt_bundle.get("character_assignment") if isinstance(prompt_bundle.get("character_assignment"), dict) else {}
+            resolved_primary_index = _coerce_character_index(assignment.get("primary_index"), len(characters))
+            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=3)
+
+            if resolved_primary_index is None:
+                resolved_primary_index = default_primary_index
+            if resolved_primary_index is not None and resolved_primary_index not in resolved_related_indexes:
+                resolved_related_indexes.insert(0, resolved_primary_index)
+            if not resolved_related_indexes:
+                resolved_related_indexes = list(default_related_indexes)
+
+            selected_character, selected_related = _pick_characters_by_indexes(
+                characters,
+                resolved_primary_index,
+                resolved_related_indexes,
+            )
+            if selected_character is not None:
+                character = selected_character
+                related_characters = selected_related or [selected_character]
+                if character not in related_characters:
+                    related_characters.insert(0, character)
+                related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+                logger.info(
+                    "Segment %s character assignment from prompt call: primary=%s confidence=%.2f reason=%s",
+                    index + 1,
+                    character.name,
+                    float(assignment.get("confidence") or 0.0),
+                    str(assignment.get("reason") or ""),
+                )
+
+            previous_primary_character = character
 
             image_task = asyncio.create_task(
                 _resolve_segment_image(

@@ -63,6 +63,68 @@ const form = reactive({
 const characters = ref([])
 const confidence = ref(0)
 
+function normalizeCharacterIdentityFlags(source, options = {}) {
+  const { ensureOneMain = false } = options
+  const list = Array.isArray(source) ? source : []
+
+  const mainIndexes = []
+  const selfIndexes = []
+  list.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return
+    item.is_main_character = Boolean(item.is_main_character)
+    item.is_story_self = Boolean(item.is_story_self)
+    if (item.is_main_character) mainIndexes.push(index)
+    if (item.is_story_self) selfIndexes.push(index)
+  })
+
+  if (mainIndexes.length > 1) {
+    const keep = mainIndexes[0]
+    mainIndexes.slice(1).forEach((index) => {
+      list[index].is_main_character = false
+    })
+    mainIndexes.length = 0
+    mainIndexes.push(keep)
+  }
+
+  if (selfIndexes.length > 1) {
+    const keep = selfIndexes[0]
+    selfIndexes.slice(1).forEach((index) => {
+      list[index].is_story_self = false
+    })
+  }
+
+  if (ensureOneMain && !mainIndexes.length && list.length) {
+    const bestIndex = list.reduce((best, item, index) => {
+      const score = Number(item?.importance || 0)
+      return score > Number(list[best]?.importance || 0) ? index : best
+    }, 0)
+    list[bestIndex].is_main_character = true
+  }
+
+  return list
+}
+
+function setMainCharacter(index, value) {
+  const enabled = Boolean(value)
+  if (!enabled) {
+    const target = characters.value[index]
+    if (target && target.is_main_character) {
+      target.is_main_character = true
+    }
+    return
+  }
+  characters.value.forEach((item, itemIndex) => {
+    item.is_main_character = enabled && itemIndex === index
+  })
+}
+
+function setStorySelf(index, value) {
+  const enabled = Boolean(value)
+  characters.value.forEach((item, itemIndex) => {
+    item.is_story_self = enabled && itemIndex === index
+  })
+}
+
 const segmentPreview = reactive({
   total_segments: 0,
   total_sentences: 0,
@@ -1239,12 +1301,15 @@ async function runAnalyze() {
       analysis_depth: form.analysis_depth,
       model_id: selectedModel.value || null
     })
-    characters.value = (data.characters || []).map((item) => ({
+    const normalizedCharacters = (data.characters || []).map((item) => ({
       ...item,
+      is_main_character: Boolean(item?.is_main_character),
+      is_story_self: Boolean(item?.is_story_self),
       reference_image_path: item.reference_image_path || '',
       reference_image_url: item.reference_image_url || '',
       voice_id: item.voice_id || voices.value[0]?.id || 'zh-CN-YunxiNeural'
     }))
+    characters.value = normalizeCharacterIdentityFlags(normalizedCharacters, { ensureOneMain: true })
     confidence.value = Number(data.confidence || 0)
     ElMessage.success(t('toast.analyzeSuccess'))
   } catch (error) {
@@ -2156,6 +2221,26 @@ onUnmounted(() => {
           <div>
             <label>{{ t('field.roleType') }}</label>
             <el-input v-model="character.role" />
+          </div>
+
+          <div>
+            <label>{{ t('field.mainCharacter') }}</label>
+            <el-checkbox
+              :model-value="!!character.is_main_character"
+              @change="(value) => setMainCharacter(index, value)"
+            >
+              {{ t('field.mainCharacter') }}
+            </el-checkbox>
+          </div>
+
+          <div>
+            <label>{{ t('field.storySelf') }}</label>
+            <el-checkbox
+              :model-value="!!character.is_story_self"
+              @change="(value) => setStorySelf(index, value)"
+            >
+              {{ t('field.storySelf') }}
+            </el-checkbox>
           </div>
 
           <div>

@@ -24,6 +24,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
     "Scene/background/action must be inferred from current segment text.",
     "If current segment omits explicit character name, use adjacent segment context to infer the implied acting/speaking character.",
+    "When character_candidates are provided, return primary_index and related_indexes using those candidate indexes.",
     "If story_world_context is provided, keep era/architecture/costume/props/culture consistent with that world setting.",
     "Output one concise production-ready prompt in English.",
     "Also output strict scene metadata for cache-reuse matching.",
@@ -153,11 +154,15 @@ def build_character_analysis_prompt(
         f"{world_clause}"
         "Character setting must be consistent with the story world context: era, region/culture, social identity, clothing, props and tone. "
         "Unless the text explicitly says otherwise, avoid cross-world mismatch (e.g. ancient Chinese setting with modern/western/Japanese role styling). "
+        "Also determine character identity flags: is_main_character and is_story_self. "
+        "is_story_self means this character corresponds to first-person narrator 'I/我' in the novel perspective. "
+        "At most one character can be is_main_character=true, and at most one can be is_story_self=true. "
         "voice_id must be selected strictly from the allowed voice IDs below. "
         "Do not invent any new voice name or ID. "
         "If unsure, choose the closest one from the list. "
         "JSON schema: "
         "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
+        "\"is_main_character\":false,\"is_story_self\":false,"
         "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
         "\"confidence\":0.0}"
         "\n\nAllowed voice IDs: "
