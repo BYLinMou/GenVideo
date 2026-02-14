@@ -819,7 +819,12 @@ async function refreshWorkspaceAuthStatus(options = {}) {
 }
 
 async function bootstrapWorkspaceData() {
-  if (workspaceDataBootstrapped.value) return
+  if (workspaceDataBootstrapped.value) {
+    if (jobs.value.length && !pollingTimer) {
+      startPolling()
+    }
+    return
+  }
   restoreJobSnapshot()
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
@@ -859,6 +864,13 @@ function handleWorkspaceAuthRequired() {
   api.clearWorkspacePassword()
   setWorkspaceLockedState()
   workspaceAuthError.value = t('toast.workspaceSessionExpired')
+}
+
+function logoutWorkspace() {
+  api.clearWorkspacePassword()
+  setWorkspaceLockedState()
+  workspaceAuthError.value = ''
+  ElMessage.success(t('toast.workspaceLoggedOut'))
 }
 
 function formatDateTime(value) {
@@ -1734,6 +1746,9 @@ onUnmounted(() => {
       </el-button>
       <el-button :type="activePage === PAGE_FINAL_VIDEOS ? 'primary' : 'default'" @click="switchPage(PAGE_FINAL_VIDEOS)">
         {{ t('page.finalVideos') }}
+      </el-button>
+      <el-button v-if="workspaceAuthRequired && workspaceUnlocked" @click="logoutWorkspace">
+        {{ t('action.workspaceLogout') }}
       </el-button>
     </div>
 
