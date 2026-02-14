@@ -129,6 +129,11 @@ Final videos library behavior:
 - First load shows thumbnails only (no full video preload)
 - Each card provides `View Video` and `Download` actions
 
+Workspace draft behavior:
+
+- Workspace form inputs (including text, character configs, and selected model) are auto-saved to browser local storage
+- On next visit, the workspace auto-loads the latest single local draft (new changes overwrite old draft)
+
 ## Environment
 
 See `.env.example`.
