@@ -162,6 +162,12 @@ label {
   margin-bottom: 12px;
 }
 
+.job-pagination {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
 .job-list-item {
   display: flex;
   align-items: center;

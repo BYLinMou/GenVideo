@@ -236,6 +236,8 @@ const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
 const clipVideoEnabled = reactive({})
 const finalVideoEnabled = reactive({})
+const JOB_LIST_PAGE_SIZE = 5
+const jobListPage = ref(1)
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -244,6 +246,34 @@ const sortedJobs = computed(() => {
     return String(a.id || '').localeCompare(String(b.id || ''))
   })
 })
+
+const jobListTotalPages = computed(() => {
+  if (!sortedJobs.value.length) return 1
+  return Math.max(1, Math.ceil(sortedJobs.value.length / JOB_LIST_PAGE_SIZE))
+})
+
+const pagedJobs = computed(() => {
+  const start = (Math.max(1, Number(jobListPage.value || 1)) - 1) * JOB_LIST_PAGE_SIZE
+  return sortedJobs.value.slice(start, start + JOB_LIST_PAGE_SIZE)
+})
+
+function clampJobListPage() {
+  const maxPage = jobListTotalPages.value
+  if (jobListPage.value > maxPage) {
+    jobListPage.value = maxPage
+  }
+  if (jobListPage.value < 1) {
+    jobListPage.value = 1
+  }
+}
+
+function setJobListPageForJob(jobId) {
+  const id = String(jobId || '').trim()
+  if (!id) return
+  const index = sortedJobs.value.findIndex((item) => String(item.id || '') === id)
+  if (index < 0) return
+  jobListPage.value = Math.floor(index / JOB_LIST_PAGE_SIZE) + 1
+}
 
 const effectiveSegmentGroups = computed(() => {
   if (!segmentPreview.total_segments) return 0
@@ -885,8 +915,10 @@ function removeJobRecord(jobId) {
   const id = String(jobId || '')
   if (!id) return
   jobs.value = jobs.value.filter((item) => item.id !== id)
+  clampJobListPage()
   if (activeJobId.value === id) {
-    activeJobId.value = jobs.value[0]?.id || ''
+    activeJobId.value = sortedJobs.value[0]?.id || ''
+    setJobListPageForJob(activeJobId.value)
     const next = jobs.value.find((item) => item.id === activeJobId.value)
     if (next) {
       syncJobViewFromRecord(next)
@@ -1212,6 +1244,7 @@ function selectJob(jobId) {
   if (!id) return
   resetClipVideoEnabledForJob(id)
   activeJobId.value = id
+  setJobListPageForJob(id)
   const found = jobs.value.find((item) => item.id === id)
   if (found) {
     syncJobViewFromRecord(found)
@@ -1339,8 +1372,9 @@ function restoreJobSnapshot() {
     if (savedActive && jobs.value.some((item) => item.id === savedActive)) {
       activeJobId.value = savedActive
     } else {
-      activeJobId.value = jobs.value[0]?.id || ''
+      activeJobId.value = sortedJobs.value[0]?.id || ''
     }
+    setJobListPageForJob(activeJobId.value)
 
     if (activeJobId.value) {
       const record = jobs.value.find((item) => item.id === activeJobId.value)
@@ -1349,6 +1383,7 @@ function restoreJobSnapshot() {
   } catch {
     jobs.value = []
     activeJobId.value = ''
+    jobListPage.value = 1
   }
 }
 
@@ -2035,6 +2070,14 @@ onMounted(async () => {
 })
 
 watch(
+  sortedJobs,
+  () => {
+    clampJobListPage()
+  },
+  { deep: false }
+)
+
+watch(
   form,
   () => {
     schedulePersistWorkspaceDraft()
@@ -2548,7 +2591,7 @@ onUnmounted(() => {
       <h2>{{ t('section.render') }}</h2>
       <div v-if="sortedJobs.length" class="job-list">
         <div
-          v-for="item in sortedJobs"
+          v-for="item in pagedJobs"
           :key="item.id"
           class="job-list-item"
           :class="{ active: item.id === activeJobId }"
@@ -2566,6 +2609,16 @@ onUnmounted(() => {
           </div>
           <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
         </div>
+      </div>
+
+      <div v-if="sortedJobs.length" class="job-pagination">
+        <el-pagination
+          v-model:current-page="jobListPage"
+          :page-size="JOB_LIST_PAGE_SIZE"
+          :total="sortedJobs.length"
+          layout="prev, pager, next"
+          background
+        />
       </div>
 
       <div class="actions">
