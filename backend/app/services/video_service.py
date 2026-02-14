@@ -1658,6 +1658,34 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
     }
 
 
+def _extract_source_counts_from_report(report: dict[str, object] | None) -> dict[str, int]:
+    if not isinstance(report, dict):
+        return {}
+    raw_counts = report.get("source_counts")
+    if not isinstance(raw_counts, dict):
+        return {}
+    output: dict[str, int] = {}
+    for key, value in raw_counts.items():
+        try:
+            output[str(key)] = max(0, int(value or 0))
+        except Exception:
+            continue
+    return output
+
+
+def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> dict[str, int]:
+    current = job_store.get(job_id)
+    if not current:
+        return source_counts
+    persisted = _extract_source_counts_from_report(current.image_source_report)
+    if not persisted:
+        return source_counts
+    merged = dict(source_counts)
+    for key, value in persisted.items():
+        merged[str(key)] = max(0, int(value or 0))
+    return merged
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1671,7 +1699,11 @@ def _update_job(
     clip_count: int | None = None,
     image_source_report: dict[str, object] | None = None,
 ) -> None:
-    resolved_clip_count = max(0, int(clip_count or 0))
+    current = job_store.get(job_id)
+    resolved_clip_count = max(0, int(clip_count if clip_count is not None else (current.clip_count if current else 0)))
+    resolved_image_source_report = image_source_report
+    if resolved_image_source_report is None and current is not None:
+        resolved_image_source_report = current.image_source_report
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1685,7 +1717,7 @@ def _update_job(
             output_video_path=output_video_path,
             clip_count=resolved_clip_count,
             clip_preview_urls=[],
-            image_source_report=image_source_report,
+            image_source_report=resolved_image_source_report,
         )
     )
 
@@ -1832,6 +1864,10 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "fallback_random_cache": 0,
         "other": 0,
     }
+    image_source_counts = _restore_image_source_counts(job_id, image_source_counts)
+    restored_image_count = sum(max(0, int(value or 0)) for value in image_source_counts.values())
+    if restored_image_count > 0:
+        logger.info("Restored persisted image source counts for job %s: total=%s", job_id, restored_image_count)
 
     if payload.enable_scene_image_reuse:
         ensure_scene_cache_paths()
@@ -2067,6 +2103,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=index + 1,
                 total_segments=total,
                 clip_count=rendered_clip_count,
+                image_source_report=_build_image_source_report(image_source_counts),
             )
 
         if job_store.is_cancelled(job_id):
