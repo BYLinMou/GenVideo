@@ -76,6 +76,7 @@ Default: `http://localhost:8000`
 - `GET /api/health`
 - `GET /api/workspace-auth/status`
 - `POST /api/workspace-auth/login`
+- `POST /api/workspace-auth/logout`
 - `GET /api/models`
 - `GET /api/tts/voices`
 - `GET /api/logs/tail?lines=200`
@@ -130,6 +131,7 @@ See `.env.example`.
 Workspace auth gate:
 
 - `ADMIN_PASSWORD` (optional): when set, workspace APIs require header `x-workspace-password`
+- Workspace login also sets an auth cookie for media tags (`img/video`) so clip thumbnails and video preview can load normally
 - Public final videos endpoints remain open: `/api/final-videos/*`
 
 Important paths:

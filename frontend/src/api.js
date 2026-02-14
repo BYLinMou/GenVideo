@@ -69,6 +69,7 @@ async function request(path, options = {}) {
 
   const response = await fetch(buildApiUrl(path), {
     cache: restOptions.cache || 'no-store',
+    credentials: restOptions.credentials || 'same-origin',
     headers,
     ...restOptions
   })
@@ -125,6 +126,9 @@ export const api = {
     const result = await jsonRequest('/api/workspace-auth/login', 'POST', { password: value })
     this.setWorkspacePassword(value)
     return result
+  },
+  logoutWorkspace() {
+    return jsonRequest('/api/workspace-auth/logout', 'POST')
   },
   health() {
     return request('/api/health')

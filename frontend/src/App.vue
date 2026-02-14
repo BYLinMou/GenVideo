@@ -139,6 +139,7 @@ const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
 const clipVideoEnabled = reactive({})
+const finalVideoEnabled = reactive({})
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -709,6 +710,26 @@ function getClipVideoUrl(index) {
   return api.getClipUrl(job.id, Number(index))
 }
 
+function finalVideoKey(item, index) {
+  const name = String(item?.filename || '').trim()
+  if (name) return `final-video:${name}`
+  return `final-video-index:${Number(index)}`
+}
+
+function isFinalVideoEnabled(item, index) {
+  return !!finalVideoEnabled[finalVideoKey(item, index)]
+}
+
+function enableFinalVideo(item, index) {
+  finalVideoEnabled[finalVideoKey(item, index)] = true
+}
+
+function resetFinalVideoEnabled() {
+  Object.keys(finalVideoEnabled).forEach((key) => {
+    delete finalVideoEnabled[key]
+  })
+}
+
 function normalizeRuntimeUrl(raw) {
   const value = String(raw || '').trim()
   if (!value) return ''
@@ -763,11 +784,13 @@ async function loadFinalVideos(options = {}) {
       thumbnailUrl: normalizeRuntimeUrl(item.thumbnail_url || ''),
       downloadUrl: normalizeRuntimeUrl(item.download_url || '')
     }))
+    resetFinalVideoEnabled()
   } catch (error) {
     if (!silent) {
       ElMessage.error(t('toast.finalVideosLoadFailed', { error: error.message }))
     }
     finalVideos.value = []
+    resetFinalVideoEnabled()
   } finally {
     loading.finalVideos = false
   }
@@ -866,7 +889,11 @@ function handleWorkspaceAuthRequired() {
   workspaceAuthError.value = t('toast.workspaceSessionExpired')
 }
 
-function logoutWorkspace() {
+async function logoutWorkspace() {
+  try {
+    await api.logoutWorkspace()
+  } catch {
+  }
   api.clearWorkspacePassword()
   setWorkspaceLockedState()
   workspaceAuthError.value = ''
@@ -2266,13 +2293,31 @@ onUnmounted(() => {
         </div>
 
         <div v-if="finalVideos.length" class="final-video-grid">
-          <article v-for="item in finalVideos" :key="item.filename" class="final-video-item">
-            <img :src="item.thumbnailUrl" class="final-video-thumb" loading="lazy" :alt="item.filename" />
+          <article v-for="(item, index) in finalVideos" :key="item.filename" class="final-video-item">
+            <div
+              v-if="!isFinalVideoEnabled(item, index)"
+              class="clip-thumb-wrap"
+              role="button"
+              tabindex="0"
+              @click="enableFinalVideo(item, index)"
+              @keydown.enter.prevent="enableFinalVideo(item, index)"
+            >
+              <img :src="item.thumbnailUrl" class="final-video-thumb" loading="lazy" :alt="item.filename" />
+              <div class="clip-thumb-play">▶</div>
+            </div>
+            <video
+              v-else
+              :src="item.videoUrl"
+              :poster="item.thumbnailUrl"
+              controls
+              preload="none"
+              class="video"
+            />
             <div class="final-video-name">{{ item.filename }}</div>
             <div class="muted">{{ t('hint.finalVideoCreatedAt', { time: formatDateTime(item.createdAt) }) }}</div>
             <div class="muted">{{ t('hint.finalVideoSize', { size: formatFileSize(item.size) }) }}</div>
             <div class="actions">
-              <a :href="item.videoUrl" target="_blank" rel="noopener noreferrer">{{ t('action.openFinalVideo') }}</a>
+              <el-button text @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
               <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
             </div>
           </article>

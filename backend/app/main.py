@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import logging
 from datetime import datetime
 import shutil
@@ -101,6 +102,8 @@ app.mount(
     name="bgm_assets",
 )
 
+WORKSPACE_AUTH_COOKIE = "workspace_auth_token"
+
 
 def _workspace_password_required() -> bool:
     return bool((settings.admin_password or "").strip())
@@ -112,6 +115,24 @@ def _workspace_password_valid(provided: str | None) -> bool:
         return True
     current = str(provided or "")
     return hmac.compare_digest(current, expected)
+
+
+def _workspace_password_token(raw: str | None) -> str:
+    value = str(raw or "")
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _workspace_cookie_valid(request: Request) -> bool:
+    expected = (settings.admin_password or "").strip()
+    if not expected:
+        return True
+    expected_token = _workspace_password_token(expected)
+    current_token = str(request.cookies.get(WORKSPACE_AUTH_COOKIE) or "")
+    if not current_token:
+        return False
+    return hmac.compare_digest(current_token, expected_token)
 
 
 def _is_public_api_path(path: str) -> bool:
@@ -134,9 +155,12 @@ async def workspace_auth_middleware(request: Request, call_next):
     if not _workspace_password_required() or _is_public_api_path(request.url.path):
         return await call_next(request)
 
-    if not _workspace_password_valid(request.headers.get("x-workspace-password")):
-        return JSONResponse(status_code=401, content={"detail": "workspace authentication required"})
-    return await call_next(request)
+    if _workspace_password_valid(request.headers.get("x-workspace-password")):
+        return await call_next(request)
+    if _workspace_cookie_valid(request):
+        return await call_next(request)
+
+    return JSONResponse(status_code=401, content={"detail": "workspace authentication required"})
 
 
 def _bgm_root() -> Path:
@@ -355,7 +379,23 @@ async def workspace_auth_login(payload: WorkspaceLoginRequest) -> dict:
         return {"ok": True}
     if not _workspace_password_valid(payload.password):
         raise HTTPException(status_code=401, detail="invalid workspace password")
-    return {"ok": True}
+    response = JSONResponse(content={"ok": True})
+    response.set_cookie(
+        key=WORKSPACE_AUTH_COOKIE,
+        value=_workspace_password_token(payload.password),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/workspace-auth/logout")
+async def workspace_auth_logout() -> dict:
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie(WORKSPACE_AUTH_COOKIE, path="/")
+    return response
 
 
 @app.get("/api/logs/tail")
