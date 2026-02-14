@@ -407,9 +407,26 @@ def _parse_resolution(value: str) -> tuple[int, int]:
         return 1080, 1920
 
 
-def _pick_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion:
-    if not characters:
-        return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
+_SPEECH_VERBS = (
+    "说",
+    "说道",
+    "道",
+    "问",
+    "回答",
+    "答",
+    "喊",
+    "叫",
+    "嘀咕",
+    "喃喃",
+    "开口",
+    "提醒",
+    "反问",
+    "怒喝",
+    "笑道",
+)
+
+
+def _mentions_in_text(characters: list[CharacterSuggestion], text: str) -> list[tuple[int, int, CharacterSuggestion]]:
     content = text or ""
     hits: list[tuple[int, int, CharacterSuggestion]] = []
     for item in characters:
@@ -419,20 +436,111 @@ def _pick_character(characters: list[CharacterSuggestion], text: str) -> Charact
         pos = content.find(name)
         if pos >= 0:
             hits.append((pos, -int(item.importance or 0), item))
+    hits.sort(key=lambda row: (row[0], row[1]))
+    return hits
+
+
+def _detect_speaker_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion | None:
+    content = text or ""
+    if not content:
+        return None
+
+    best: tuple[int, int, CharacterSuggestion] | None = None
+    for item in characters:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        escaped = re.escape(name)
+        patterns = [
+            rf"{escaped}\s*(?:[，,：: ]\s*)?(?:{'|'.join(_SPEECH_VERBS)})",
+            rf"(?:{'|'.join(_SPEECH_VERBS)})\s*(?:[，,：: ]\s*)?{escaped}",
+            rf"{escaped}\s*[：:]",
+        ]
+        for pattern in patterns:
+            matched = re.search(pattern, content)
+            if not matched:
+                continue
+            candidate = (matched.start(), -int(item.importance or 0), item)
+            if best is None or candidate < best:
+                best = candidate
+            break
+
+    return best[2] if best else None
+
+
+def _pick_character(
+    characters: list[CharacterSuggestion],
+    text: str,
+    previous_character: CharacterSuggestion | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+) -> CharacterSuggestion:
+    if not characters:
+        return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
+
+    current_text = text or ""
+    hits = _mentions_in_text(characters, current_text)
     if hits:
-        hits.sort(key=lambda item: (item[0], item[1]))
         return hits[0][2]
+
+    speaker = _detect_speaker_character(characters, current_text)
+    if speaker is not None:
+        return speaker
+
+    has_dialogue = any(mark in current_text for mark in _DIALOG_QUOTE_PAIRS.keys())
+    if has_dialogue and previous_segment_text:
+        previous_speaker = _detect_speaker_character(characters, previous_segment_text)
+        if previous_speaker is not None:
+            return previous_speaker
+
+    weighted_scores: dict[int, tuple[float, CharacterSuggestion]] = {}
+    for item in characters:
+        marker = id(item)
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        score = 0.0
+        score += float(current_text.count(name)) * 6.0
+        score += float((previous_segment_text or "").count(name)) * 2.5
+        score += float((next_segment_text or "").count(name)) * 1.5
+        score += float(int(item.importance or 0)) * 0.08
+        if previous_character is item and has_dialogue:
+            score += 1.25
+        weighted_scores[marker] = (score, item)
+
+    ranked = sorted(weighted_scores.values(), key=lambda row: row[0], reverse=True)
+    if ranked and ranked[0][0] > 0:
+        return ranked[0][1]
+
+    if previous_character is not None:
+        return previous_character
     return characters[0]
 
 
-def _pick_related_characters(characters: list[CharacterSuggestion], text: str, primary: CharacterSuggestion) -> list[CharacterSuggestion]:
+def _pick_related_characters(
+    characters: list[CharacterSuggestion],
+    text: str,
+    primary: CharacterSuggestion,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+) -> list[CharacterSuggestion]:
     if not characters:
         return []
-    normalized = (text or "").strip()
+
+    normalized_current = (text or "").strip()
+    normalized_previous = (previous_segment_text or "").strip()
+    normalized_next = (next_segment_text or "").strip()
     selected: list[CharacterSuggestion] = []
 
+    current_hits = _mentions_in_text(characters, normalized_current)
+    for _, _, item in current_hits:
+        selected.append(item)
+
     for item in characters:
-        if item.name and item.name in normalized:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        if name in normalized_previous or name in normalized_next:
             selected.append(item)
 
     if primary not in selected:
@@ -1540,6 +1648,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
         lookback_scenes = no_repeat_window
         recent_scene_entry_ids = deque(maxlen=lookback_scenes if lookback_scenes > 0 else None)
+        previous_primary_character: CharacterSuggestion | None = None
 
         for index, segment_text in enumerate(segments):
             if job_store.is_cancelled(job_id):
@@ -1572,9 +1681,25 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 clip_count=rendered_clip_count,
             )
 
-            character = _pick_character(characters, segment_text)
-            related_characters = _pick_related_characters(characters, segment_text, character)
+            previous_segment_text = segments[index - 1] if index > 0 else ""
+            next_segment_text = segments[index + 1] if index + 1 < total else ""
+
+            character = _pick_character(
+                characters,
+                segment_text,
+                previous_character=previous_primary_character,
+                previous_segment_text=previous_segment_text,
+                next_segment_text=next_segment_text,
+            )
+            related_characters = _pick_related_characters(
+                characters,
+                segment_text,
+                character,
+                previous_segment_text=previous_segment_text,
+                next_segment_text=next_segment_text,
+            )
             related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+            previous_primary_character = character
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
@@ -1605,6 +1730,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     model_id=payload.model_id,
                     related_reference_image_paths=related_reference_paths,
                     story_world_context=story_world_context,
+                    previous_segment_text=previous_segment_text,
+                    next_segment_text=next_segment_text,
                 )
             )
             audio_task = asyncio.create_task(

@@ -461,9 +461,22 @@ def _fallback_segment_image_prompt(
     character: CharacterSuggestion,
     segment_text: str,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> str:
     guard = _character_identity_guard(character)
-    scene_text = _clean_text(segment_text, 1200)
+    current_segment = _clean_text(segment_text, 1200)
+    previous_segment = _clean_text(previous_segment_text, 420)
+    next_segment = _clean_text(next_segment_text, 420)
+    if previous_segment or next_segment:
+        context_parts: list[str] = [f"Current segment: {current_segment}"]
+        if previous_segment:
+            context_parts.append(f"Previous segment context: {previous_segment}")
+        if next_segment:
+            context_parts.append(f"Next segment context: {next_segment}")
+        scene_text = _clean_text("\n".join(context_parts), 1900)
+    else:
+        scene_text = current_segment
     return build_fallback_segment_image_prompt(
         guard=guard,
         scene_text=scene_text,
@@ -475,8 +488,16 @@ def _fallback_segment_image_bundle(
     character: CharacterSuggestion,
     segment_text: str,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> dict:
-    prompt = _fallback_segment_image_prompt(character, segment_text, story_world_context=story_world_context)
+    prompt = _fallback_segment_image_prompt(
+        character,
+        segment_text,
+        story_world_context=story_world_context,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
+    )
     return {
         "prompt": prompt,
         "metadata": _fallback_scene_metadata(segment_text, prompt),
@@ -522,11 +543,15 @@ async def build_segment_image_bundle(
     model_id: str | None,
     related_reference_image_paths: list[str] | None = None,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> dict:
     fallback_bundle = _fallback_segment_image_bundle(
         character,
         segment_text,
         story_world_context=story_world_context,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
     )
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
@@ -548,6 +573,10 @@ async def build_segment_image_bundle(
         },
         "story_world_context": world_context,
         "current_segment": _clean_text(segment_text, 1800),
+        "adjacent_context": {
+            "previous_segment": _clean_text(previous_segment_text, 500),
+            "next_segment": _clean_text(next_segment_text, 500),
+        },
         "output_schema": {
             "prompt": "",
             "action_hint": "",
@@ -606,13 +635,22 @@ async def build_segment_image_prompt(
     character: CharacterSuggestion,
     segment_text: str,
     model_id: str | None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> str:
     bundle = await build_segment_image_bundle(
         character=character,
         segment_text=segment_text,
         model_id=model_id,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
     )
-    return _clean_text(str(bundle.get("prompt", "")), 2600) or _fallback_segment_image_prompt(character, segment_text)
+    return _clean_text(str(bundle.get("prompt", "")), 2600) or _fallback_segment_image_prompt(
+        character,
+        segment_text,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
+    )
 
 
 def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:

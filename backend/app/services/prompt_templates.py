@@ -23,6 +23,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Prefer 2D anime style, clean line art and cel shading; avoid photorealistic or 3D-render look.",
     "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
     "Scene/background/action must be inferred from current segment text.",
+    "If current segment omits explicit character name, use adjacent segment context to infer the implied acting/speaking character.",
     "If story_world_context is provided, keep era/architecture/costume/props/culture consistent with that world setting.",
     "Output one concise production-ready prompt in English.",
     "Also output strict scene metadata for cache-reuse matching.",
