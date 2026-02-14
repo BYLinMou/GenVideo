@@ -74,16 +74,24 @@ Default: `http://localhost:8000`
 ### Key APIs
 
 - `GET /api/health`
+- `GET /api/workspace-auth/status`
+- `POST /api/workspace-auth/login`
+- `POST /api/workspace-auth/logout`
 - `GET /api/models`
 - `GET /api/tts/voices`
 - `GET /api/logs/tail?lines=200`
 - `POST /api/analyze-characters`
+- `POST /api/generate-novel-aliases`
 - `POST /api/confirm-characters`
 - `POST /api/segment-text`
 - `GET /api/character-reference-images`
 - `POST /api/character-reference-images/upload`
 - `POST /api/character-reference-images/generate`
 - `POST /api/bgm/upload`
+- `POST /api/watermark/upload`
+- `GET /api/bgm/library`
+- `POST /api/bgm/select`
+- `DELETE /api/bgm/current`
 - `GET /api/bgm`
 - `POST /api/generate-video`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
@@ -94,6 +102,9 @@ Default: `http://localhost:8000`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}/thumb` (on-demand cached clip thumbnail, JPG)
 - `GET /api/jobs/{job_id}/video`
+- `GET /api/final-videos?limit=200` (list final videos sorted by creation time desc)
+- `GET /api/final-videos/{filename}/thumb` (on-demand cached final-video thumbnail)
+- `GET /api/final-videos/{filename}/download`
 
 ## Frontend
 
@@ -107,9 +118,26 @@ npm run dev
 
 Default: `http://localhost:5173`
 
+Page paths (history mode):
+
+- Workspace: `/workspace`
+- Final videos library: `/final-videos`
+
+Final videos library behavior:
+
+- List is sorted by creation time (newest first)
+- First load shows thumbnails only (no full video preload)
+- Each card provides `View Video` and `Download` actions
+
 ## Environment
 
 See `.env.example`.
+
+Workspace auth gate:
+
+- `ADMIN_PASSWORD` (optional): when set, workspace APIs require header `x-workspace-password`
+- Workspace login also sets an auth cookie for media tags (`img/video`) so clip thumbnails and video preview can load normally
+- Public final videos endpoints remain open: `/api/final-videos/*`
 
 Important paths:
 

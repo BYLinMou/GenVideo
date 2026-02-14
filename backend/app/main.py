@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hmac
+import hashlib
 import logging
 from datetime import datetime
 import shutil
@@ -27,6 +29,8 @@ from .models import (
     CharacterImageItem,
     ConfirmCharactersRequest,
     CreateCharacterImageRequest,
+    FinalVideoItem,
+    FinalVideoListResponse,
     GenerateNovelAliasesRequest,
     GenerateNovelAliasesResponse,
     GenerateVideoRequest,
@@ -37,6 +41,8 @@ from .models import (
     SegmentItem,
     SegmentTextRequest,
     SegmentTextResponse,
+    WorkspaceAuthStatusResponse,
+    WorkspaceLoginRequest,
 )
 from .services.character_assets_service import (
     create_character_reference_image,
@@ -95,6 +101,66 @@ app.mount(
     StaticFiles(directory=project_path("assets/bgm")),
     name="bgm_assets",
 )
+
+WORKSPACE_AUTH_COOKIE = "workspace_auth_token"
+
+
+def _workspace_password_required() -> bool:
+    return bool((settings.admin_password or "").strip())
+
+
+def _workspace_password_valid(provided: str | None) -> bool:
+    expected = (settings.admin_password or "").strip()
+    if not expected:
+        return True
+    current = str(provided or "")
+    return hmac.compare_digest(current, expected)
+
+
+def _workspace_password_token(raw: str | None) -> str:
+    value = str(raw or "")
+    if not value:
+        return ""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _workspace_cookie_valid(request: Request) -> bool:
+    expected = (settings.admin_password or "").strip()
+    if not expected:
+        return True
+    expected_token = _workspace_password_token(expected)
+    current_token = str(request.cookies.get(WORKSPACE_AUTH_COOKIE) or "")
+    if not current_token:
+        return False
+    return hmac.compare_digest(current_token, expected_token)
+
+
+def _is_public_api_path(path: str) -> bool:
+    normalized = str(path or "").strip()
+    if not normalized.startswith("/api/"):
+        return True
+    public_prefixes = (
+        "/api/health",
+        "/api/workspace-auth",
+        "/api/final-videos",
+    )
+    return any(normalized == prefix or normalized.startswith(f"{prefix}/") for prefix in public_prefixes)
+
+
+@app.middleware("http")
+async def workspace_auth_middleware(request: Request, call_next):
+    if request.method.upper() == "OPTIONS":
+        return await call_next(request)
+
+    if not _workspace_password_required() or _is_public_api_path(request.url.path):
+        return await call_next(request)
+
+    if _workspace_password_valid(request.headers.get("x-workspace-password")):
+        return await call_next(request)
+    if _workspace_cookie_valid(request):
+        return await call_next(request)
+
+    return JSONResponse(status_code=401, content={"detail": "workspace authentication required"})
 
 
 def _bgm_root() -> Path:
@@ -187,6 +253,63 @@ def _job_clip_thumb_path(job_id: str, clip_index: int) -> Path:
     return project_path(settings.temp_dir) / job_id / "thumbs" / f"clip_{clip_index:04d}.jpg"
 
 
+def _resolve_final_video_path(filename: str) -> Path:
+    safe_name = Path(filename or "").name
+    if not safe_name or safe_name != str(filename or ""):
+        raise HTTPException(status_code=400, detail="invalid filename")
+    if Path(safe_name).suffix.lower() != ".mp4":
+        raise HTTPException(status_code=400, detail="only mp4 files are supported")
+
+    target = project_path(settings.output_dir) / safe_name
+    if not target.exists() or not target.is_file():
+        raise HTTPException(status_code=404, detail="video not found")
+    return target
+
+
+def _final_video_thumb_path(filename: str) -> Path:
+    safe_name = Path(filename or "").name
+    stem = Path(safe_name).stem
+    return project_path(settings.temp_dir) / "final_video_thumbs" / f"{stem}.jpg"
+
+
+def _ensure_final_video_thumbnail(filename: str) -> Path:
+    video_path = _resolve_final_video_path(filename)
+    thumb_path = _final_video_thumb_path(filename)
+
+    if thumb_path.exists():
+        try:
+            if thumb_path.stat().st_size >= 512 and thumb_path.stat().st_mtime >= video_path.stat().st_mtime:
+                return thumb_path
+        except Exception:
+            pass
+
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        raise RuntimeError("ffmpeg not found")
+
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    proc = subprocess.run(
+        [
+            ffmpeg_bin,
+            "-y",
+            "-i",
+            str(video_path),
+            "-frames:v",
+            "1",
+            "-q:v",
+            "4",
+            str(thumb_path),
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    if proc.returncode != 0 or not thumb_path.exists():
+        raise RuntimeError((proc.stderr or "ffmpeg thumbnail failed")[:300])
+
+    return thumb_path
+
+
 def _ensure_job_clip_thumbnail(job_id: str, clip_index: int) -> Path:
     clip_path = _job_clip_path(job_id, clip_index)
     if not clip_path.exists() or not clip_path.is_file():
@@ -243,6 +366,36 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
 @app.get("/api/health")
 async def health() -> dict:
     return {"status": "ok", "env": settings.app_env}
+
+
+@app.get("/api/workspace-auth/status", response_model=WorkspaceAuthStatusResponse)
+async def workspace_auth_status() -> WorkspaceAuthStatusResponse:
+    return WorkspaceAuthStatusResponse(required=_workspace_password_required())
+
+
+@app.post("/api/workspace-auth/login")
+async def workspace_auth_login(payload: WorkspaceLoginRequest) -> dict:
+    if not _workspace_password_required():
+        return {"ok": True}
+    if not _workspace_password_valid(payload.password):
+        raise HTTPException(status_code=401, detail="invalid workspace password")
+    response = JSONResponse(content={"ok": True})
+    response.set_cookie(
+        key=WORKSPACE_AUTH_COOKIE,
+        value=_workspace_password_token(payload.password),
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/workspace-auth/logout")
+async def workspace_auth_logout() -> dict:
+    response = JSONResponse(content={"ok": True})
+    response.delete_cookie(WORKSPACE_AUTH_COOKIE, path="/")
+    return response
 
 
 @app.get("/api/logs/tail")
@@ -598,3 +751,57 @@ async def get_job_clip_thumbnail(job_id: str, clip_index: int):
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return FileResponse(thumb_path, media_type="image/jpeg", filename=thumb_path.name)
+
+
+@app.get("/api/final-videos", response_model=FinalVideoListResponse)
+async def list_final_videos(limit: int = 200) -> FinalVideoListResponse:
+    safe_limit = max(1, min(int(limit or 200), 2000))
+    output_root = project_path(settings.output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    rows: list[tuple[float, FinalVideoItem]] = []
+    for path in output_root.glob("*.mp4"):
+        try:
+            stat = path.stat()
+            created_ts = float(getattr(stat, "st_ctime", 0.0) or 0.0)
+            updated_ts = float(getattr(stat, "st_mtime", created_ts) or created_ts)
+            created_at = datetime.fromtimestamp(created_ts).isoformat(timespec="seconds")
+            updated_at = datetime.fromtimestamp(updated_ts).isoformat(timespec="seconds")
+            safe_name = path.name
+            encoded = quote(safe_name)
+            rows.append(
+                (
+                    created_ts,
+                    FinalVideoItem(
+                        filename=safe_name,
+                        size=int(stat.st_size),
+                        created_at=created_at,
+                        updated_at=updated_at,
+                        video_url=f"/outputs/{encoded}",
+                        thumbnail_url=f"/api/final-videos/{encoded}/thumb",
+                        download_url=f"/api/final-videos/{encoded}/download",
+                    ),
+                )
+            )
+        except Exception:
+            logger.exception("Failed to inspect final video file: %s", path)
+
+    sorted_rows = sorted(rows, key=lambda item: item[0], reverse=True)
+    return FinalVideoListResponse(videos=[item for _, item in sorted_rows[:safe_limit]])
+
+
+@app.get("/api/final-videos/{filename}/thumb")
+async def get_final_video_thumbnail(filename: str):
+    try:
+        thumb_path = await run_in_threadpool(_ensure_final_video_thumbnail, filename)
+    except HTTPException:
+        raise
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return FileResponse(thumb_path, media_type="image/jpeg", filename=thumb_path.name)
+
+
+@app.get("/api/final-videos/{filename}/download")
+async def download_final_video(filename: str):
+    path = _resolve_final_video_path(filename)
+    return FileResponse(path, media_type="video/mp4", filename=path.name)

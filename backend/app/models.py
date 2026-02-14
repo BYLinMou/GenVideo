@@ -153,6 +153,9 @@ class JobStatus(BaseModel):
     output_video_path: str | None = None
     clip_count: int = 0
     clip_preview_urls: list[str] = Field(default_factory=list)
+    image_source_report: dict[str, object] | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 class CreateCharacterImageRequest(BaseModel):
@@ -194,4 +197,26 @@ class BgmLibraryItem(BaseModel):
 
 class BgmSelectRequest(BaseModel):
     filename: str
+
+
+class FinalVideoItem(BaseModel):
+    filename: str
+    size: int
+    created_at: str
+    updated_at: str
+    video_url: str
+    thumbnail_url: str
+    download_url: str
+
+
+class FinalVideoListResponse(BaseModel):
+    videos: list[FinalVideoItem]
+
+
+class WorkspaceAuthStatusResponse(BaseModel):
+    required: bool
+
+
+class WorkspaceLoginRequest(BaseModel):
+    password: str
 

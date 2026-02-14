@@ -1,7 +1,30 @@
 const BASE = (import.meta.env.VITE_API_BASE_URL || '').trim()
+const WORKSPACE_PASSWORD_STORAGE_KEY = 'genvideo_workspace_password_v1'
+export const WORKSPACE_AUTH_REQUIRED_EVENT = 'genvideo-workspace-auth-required'
+
+let workspacePassword = ''
+if (typeof window !== 'undefined') {
+  workspacePassword = String(window.sessionStorage.getItem(WORKSPACE_PASSWORD_STORAGE_KEY) || '')
+}
 
 function stripTrailingSlash(value) {
   return String(value || '').replace(/\/+$/, '')
+}
+
+function isPublicApiPath(path) {
+  const normalizedPath = String(path || '')
+  return (
+    normalizedPath.startsWith('/api/health') ||
+    normalizedPath.startsWith('/api/workspace-auth') ||
+    normalizedPath.startsWith('/api/final-videos')
+  )
+}
+
+function clearWorkspacePasswordStorage() {
+  workspacePassword = ''
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(WORKSPACE_PASSWORD_STORAGE_KEY)
+  }
 }
 
 function buildApiUrl(path) {
@@ -34,15 +57,30 @@ async function parseJson(response) {
 }
 
 async function request(path, options = {}) {
+  const normalizedPath = String(path || '')
+  const { headers: optionHeaders = {}, ...restOptions } = options
+  const headers = {
+    ...optionHeaders
+  }
+  const publicApiPath = isPublicApiPath(normalizedPath)
+  if (workspacePassword && !publicApiPath) {
+    headers['x-workspace-password'] = workspacePassword
+  }
+
   const response = await fetch(buildApiUrl(path), {
-    cache: options.cache || 'no-store',
-    headers: {
-      ...(options.headers || {})
-    },
-    ...options
+    cache: restOptions.cache || 'no-store',
+    credentials: restOptions.credentials || 'same-origin',
+    headers,
+    ...restOptions
   })
   const data = await parseJson(response)
   if (!response.ok) {
+    if (response.status === 401 && !publicApiPath) {
+      clearWorkspacePasswordStorage()
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent(WORKSPACE_AUTH_REQUIRED_EVENT))
+      }
+    }
     const msg = data?.detail || data?.message || `Request failed: ${response.status}`
     const error = new Error(msg)
     error.status = response.status
@@ -61,6 +99,37 @@ function jsonRequest(path, method, payload) {
 }
 
 export const api = {
+  hasWorkspacePassword() {
+    return !!workspacePassword
+  },
+  getWorkspacePassword() {
+    return workspacePassword
+  },
+  setWorkspacePassword(password) {
+    workspacePassword = String(password || '')
+    if (typeof window !== 'undefined') {
+      if (workspacePassword) {
+        window.sessionStorage.setItem(WORKSPACE_PASSWORD_STORAGE_KEY, workspacePassword)
+      } else {
+        window.sessionStorage.removeItem(WORKSPACE_PASSWORD_STORAGE_KEY)
+      }
+    }
+  },
+  clearWorkspacePassword() {
+    clearWorkspacePasswordStorage()
+  },
+  getWorkspaceAuthStatus() {
+    return request('/api/workspace-auth/status')
+  },
+  async loginWorkspace(password) {
+    const value = String(password || '')
+    const result = await jsonRequest('/api/workspace-auth/login', 'POST', { password: value })
+    this.setWorkspacePassword(value)
+    return result
+  },
+  logoutWorkspace() {
+    return jsonRequest('/api/workspace-auth/logout', 'POST')
+  },
   health() {
     return request('/api/health')
   },
@@ -124,6 +193,10 @@ export const api = {
   },
   getClipThumbnailUrl(jobId, clipIndex) {
     return buildApiUrl(`/api/jobs/${jobId}/clips/${clipIndex}/thumb`)
+  },
+  listFinalVideos(limit = 200) {
+    const safeLimit = Math.max(1, Math.min(Number(limit || 200), 2000))
+    return request(`/api/final-videos?limit=${safeLimit}&_ts=${Date.now()}`, { cache: 'no-store' })
   },
   listCharacterRefImages() {
     return request('/api/character-reference-images')

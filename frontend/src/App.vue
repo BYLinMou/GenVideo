@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
-import { api } from './api'
+import { WORKSPACE_AUTH_REQUIRED_EVENT, api } from './api'
 import { t } from './i18n'
 
 const models = ref([])
@@ -20,8 +20,20 @@ const loading = reactive({
   analyze: false,
   segment: false,
   generate: false,
-  logs: false
+  logs: false,
+  finalVideos: false
 })
+
+const PAGE_WORKSPACE = 'workspace'
+const PAGE_FINAL_VIDEOS = 'final-videos'
+const activePage = ref(PAGE_WORKSPACE)
+const finalVideos = ref([])
+const workspaceAuthRequired = ref(false)
+const workspaceUnlocked = ref(true)
+const workspaceAuthLoading = ref(false)
+const workspacePasswordInput = ref('')
+const workspaceAuthError = ref('')
+const workspaceDataBootstrapped = ref(false)
 
 const form = reactive({
   text: '',
@@ -69,7 +81,8 @@ const job = reactive({
   currentSegment: 0,
   totalSegments: 0,
   videoUrl: '',
-  clipPreviewUrls: []
+  clipPreviewUrls: [],
+  imageSourceReport: null
 })
 
 const uiProgressPercent = computed(() => {
@@ -92,6 +105,21 @@ const sceneProgressText = computed(() => {
   return t('hint.sceneProgress', { current: Math.min(current, total), total })
 })
 
+const workspaceLocked = computed(() => {
+  return workspaceAuthRequired.value && !workspaceUnlocked.value
+})
+
+const imageSourceSummary = computed(() => {
+  const report = normalizeImageSourceReport(job.imageSourceReport)
+  if (!report || report.total_images <= 0) return null
+  return {
+    ...report,
+    cacheRatioText: formatRatioPercent(report.cache_ratio),
+    generatedRatioText: formatRatioPercent(report.generate_ratio),
+    otherRatioText: formatRatioPercent(report.other_ratio)
+  }
+})
+
 const bgmStatus = reactive({
   exists: false,
   filename: 'bgm.mp3',
@@ -111,6 +139,7 @@ const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
 const clipVideoEnabled = reactive({})
+const finalVideoEnabled = reactive({})
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -546,6 +575,7 @@ function resetJob() {
   job.totalSegments = 0
   job.videoUrl = ''
   job.clipPreviewUrls = []
+  job.imageSourceReport = null
 }
 
 function createLocalJobRecord(jobId) {
@@ -559,9 +589,40 @@ function createLocalJobRecord(jobId) {
     totalSegments: 0,
     videoUrl: '',
     clipPreviewUrls: [],
+    imageSourceReport: null,
     updatedAt: Date.now(),
     createdAt: Date.now()
   }
+}
+
+function normalizeImageSourceReport(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const toInt = (value) => Math.max(0, Number.parseInt(value, 10) || 0)
+  const toRatio = (value) => {
+    const num = Number(value)
+    if (!Number.isFinite(num)) return 0
+    return Math.max(0, Math.min(1, num))
+  }
+  const total = toInt(raw.total_images)
+  if (!total) return null
+  return {
+    total_images: total,
+    cache_images: toInt(raw.cache_images),
+    generated_images: toInt(raw.generated_images),
+    reference_images: toInt(raw.reference_images),
+    other_images: toInt(raw.other_images),
+    cache_ratio: toRatio(raw.cache_ratio),
+    generate_ratio: toRatio(raw.generate_ratio),
+    reference_ratio: toRatio(raw.reference_ratio),
+    other_ratio: toRatio(raw.other_ratio)
+  }
+}
+
+function formatRatioPercent(value) {
+  const ratio = Number(value)
+  if (!Number.isFinite(ratio)) return '0.0%'
+  const safe = Math.max(0, Math.min(1, ratio))
+  return `${(safe * 100).toFixed(1)}%`
 }
 
 function upsertJobRecord(record) {
@@ -613,6 +674,7 @@ function syncJobViewFromRecord(record) {
   job.totalSegments = Number(record.totalSegments || 0)
   job.videoUrl = normalizeRuntimeUrl(record.videoUrl || '')
   job.clipPreviewUrls = (record.clipPreviewUrls || []).map((item) => normalizeRuntimeUrl(item))
+  job.imageSourceReport = normalizeImageSourceReport(record.imageSourceReport)
 }
 
 function resetClipVideoEnabledForJob(jobId) {
@@ -648,6 +710,26 @@ function getClipVideoUrl(index) {
   return api.getClipUrl(job.id, Number(index))
 }
 
+function finalVideoKey(item, index) {
+  const name = String(item?.filename || '').trim()
+  if (name) return `final-video:${name}`
+  return `final-video-index:${Number(index)}`
+}
+
+function isFinalVideoEnabled(item, index) {
+  return !!finalVideoEnabled[finalVideoKey(item, index)]
+}
+
+function enableFinalVideo(item, index) {
+  finalVideoEnabled[finalVideoKey(item, index)] = true
+}
+
+function resetFinalVideoEnabled() {
+  Object.keys(finalVideoEnabled).forEach((key) => {
+    delete finalVideoEnabled[key]
+  })
+}
+
 function normalizeRuntimeUrl(raw) {
   const value = String(raw || '').trim()
   if (!value) return ''
@@ -667,6 +749,227 @@ function normalizeRuntimeUrl(raw) {
   }
 }
 
+function resolvePageFromPath() {
+  if (typeof window === 'undefined') return PAGE_WORKSPACE
+  const pathname = String(window.location.pathname || '/').trim().toLowerCase()
+  if (pathname === '/final-videos') {
+    return PAGE_FINAL_VIDEOS
+  }
+  return PAGE_WORKSPACE
+}
+
+function setPagePath(page, options = {}) {
+  if (typeof window === 'undefined') return
+  const { replace = false } = options
+  const target = page === PAGE_FINAL_VIDEOS ? '/final-videos' : '/workspace'
+  const current = String(window.location.pathname || '/').trim()
+  if (current !== target) {
+    const method = replace ? 'replaceState' : 'pushState'
+    window.history[method]({}, '', target)
+  }
+}
+
+async function loadFinalVideos(options = {}) {
+  const { silent = false } = options
+  loading.finalVideos = true
+  try {
+    const data = await api.listFinalVideos(500)
+    const items = Array.isArray(data?.videos) ? data.videos : []
+    finalVideos.value = items.map((item) => ({
+      filename: String(item.filename || ''),
+      size: Number(item.size || 0),
+      createdAt: String(item.created_at || ''),
+      updatedAt: String(item.updated_at || ''),
+      videoUrl: normalizeRuntimeUrl(item.video_url || ''),
+      thumbnailUrl: normalizeRuntimeUrl(item.thumbnail_url || ''),
+      downloadUrl: normalizeRuntimeUrl(item.download_url || '')
+    }))
+    resetFinalVideoEnabled()
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.finalVideosLoadFailed', { error: error.message }))
+    }
+    finalVideos.value = []
+    resetFinalVideoEnabled()
+  } finally {
+    loading.finalVideos = false
+  }
+}
+
+function setWorkspaceLockedState() {
+  workspaceUnlocked.value = false
+  workspacePasswordInput.value = ''
+  stopPolling()
+}
+
+async function refreshWorkspaceAuthStatus(options = {}) {
+  const { silent = false } = options
+  try {
+    const data = await api.getWorkspaceAuthStatus()
+    workspaceAuthRequired.value = !!data?.required
+    workspaceAuthError.value = ''
+
+    if (!workspaceAuthRequired.value) {
+      workspaceUnlocked.value = true
+      return true
+    }
+
+    const savedPassword = String(api.getWorkspacePassword() || '')
+    if (!savedPassword) {
+      setWorkspaceLockedState()
+      return false
+    }
+
+    try {
+      await api.loginWorkspace(savedPassword)
+      workspaceUnlocked.value = true
+      return true
+    } catch {
+      api.clearWorkspacePassword()
+      setWorkspaceLockedState()
+      if (!silent) {
+        workspaceAuthError.value = t('toast.workspacePasswordInvalid')
+      }
+      return false
+    }
+  } catch (error) {
+    if (!silent) {
+      ElMessage.error(t('toast.workspaceAuthStatusFailed', { error: error.message }))
+    }
+    setWorkspaceLockedState()
+    return false
+  }
+}
+
+async function bootstrapWorkspaceData() {
+  if (workspaceDataBootstrapped.value) {
+    if (jobs.value.length && !pollingTimer) {
+      startPolling()
+    }
+    return
+  }
+  restoreJobSnapshot()
+  await Promise.all([loadModels(), loadVoices(), loadRefImages()])
+  await loadBgmLibrary()
+  await loadBgmStatus()
+  await syncJobsFromBackend({ activateLatest: true })
+  if (jobs.value.length) {
+    startPolling()
+  }
+  workspaceDataBootstrapped.value = true
+}
+
+async function submitWorkspacePassword() {
+  const password = String(workspacePasswordInput.value || '')
+  if (!password) {
+    workspaceAuthError.value = t('toast.workspacePasswordRequired')
+    return
+  }
+
+  workspaceAuthLoading.value = true
+  workspaceAuthError.value = ''
+  try {
+    await api.loginWorkspace(password)
+    workspaceUnlocked.value = true
+    workspacePasswordInput.value = ''
+    await bootstrapWorkspaceData()
+  } catch (error) {
+    api.clearWorkspacePassword()
+    setWorkspaceLockedState()
+    workspaceAuthError.value = t('toast.workspaceLoginFailed', { error: error.message })
+  } finally {
+    workspaceAuthLoading.value = false
+  }
+}
+
+function handleWorkspaceAuthRequired() {
+  if (!workspaceAuthRequired.value) return
+  api.clearWorkspacePassword()
+  setWorkspaceLockedState()
+  workspaceAuthError.value = t('toast.workspaceSessionExpired')
+}
+
+async function logoutWorkspace() {
+  try {
+    await api.logoutWorkspace()
+  } catch {
+  }
+  api.clearWorkspacePassword()
+  setWorkspaceLockedState()
+  workspaceAuthError.value = ''
+  ElMessage.success(t('toast.workspaceLoggedOut'))
+}
+
+function formatDateTime(value) {
+  if (value == null) return '-'
+
+  let timestamp = null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    timestamp = value
+  } else {
+    const text = String(value || '').trim()
+    if (!text) return '-'
+
+    if (/^-?\d+$/.test(text)) {
+      const numeric = Number(text)
+      if (Number.isFinite(numeric)) {
+        timestamp = numeric
+      }
+    }
+
+    if (timestamp == null) {
+      const parsed = new Date(text)
+      if (Number.isNaN(parsed.getTime())) return text
+      timestamp = parsed.getTime()
+    }
+  }
+
+  const normalized = Math.abs(timestamp) < 100000000000 ? timestamp * 1000 : timestamp
+  const result = new Date(normalized)
+  if (Number.isNaN(result.getTime())) return String(value)
+  return result.toLocaleString()
+}
+
+function parseApiTimeToMs(raw) {
+  if (raw == null) return null
+  const text = String(raw).trim()
+  if (!text) return null
+  const parsed = new Date(text)
+  const ms = parsed.getTime()
+  if (!Number.isFinite(ms) || Number.isNaN(ms)) return null
+  return ms
+}
+
+async function switchPage(page) {
+  const next = page === PAGE_FINAL_VIDEOS ? PAGE_FINAL_VIDEOS : PAGE_WORKSPACE
+  activePage.value = next
+  setPagePath(next)
+  if (next === PAGE_FINAL_VIDEOS) {
+    if (!finalVideos.value.length) {
+      await loadFinalVideos()
+    }
+    return
+  }
+
+  const ok = await refreshWorkspaceAuthStatus({ silent: true })
+  if (ok) {
+    await bootstrapWorkspaceData()
+  }
+}
+
+async function handleLocationChange() {
+  const next = resolvePageFromPath()
+  activePage.value = next
+  if (next === PAGE_FINAL_VIDEOS) {
+    await loadFinalVideos({ silent: true })
+    return
+  }
+  const ok = await refreshWorkspaceAuthStatus({ silent: true })
+  if (ok) {
+    await bootstrapWorkspaceData()
+  }
+}
+
 function selectJob(jobId) {
   const id = String(jobId || '')
   if (!id) return
@@ -681,6 +984,8 @@ function selectJob(jobId) {
 function syncActiveJobRecordFromApiStatus(jobId, status) {
   const id = String(jobId || '')
   if (!id || !status) return null
+  const createdAtMs = parseApiTimeToMs(status.created_at)
+  const updatedAtMs = parseApiTimeToMs(status.updated_at)
   const next = {
     id,
     status: status.status || '',
@@ -690,8 +995,10 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
     clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
+    imageSourceReport: normalizeImageSourceReport(status.image_source_report),
     videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
-    updatedAt: Date.now()
+    updatedAt: updatedAtMs || Date.now(),
+    createdAt: createdAtMs || undefined
   }
   upsertJobRecord(next)
   if (activeJobId.value === id) {
@@ -760,6 +1067,7 @@ function persistJobSnapshot() {
       totalSegments: Number(item.totalSegments || 0),
       videoUrl: item.videoUrl || '',
       clipPreviewUrls: item.clipPreviewUrls || [],
+      imageSourceReport: normalizeImageSourceReport(item.imageSourceReport),
       updatedAt: Number(item.updatedAt || Date.now()),
       createdAt: Number(item.createdAt || Date.now())
     }))
@@ -785,6 +1093,7 @@ function restoreJobSnapshot() {
         totalSegments: Number(item.totalSegments || 0),
         videoUrl: item.videoUrl || '',
         clipPreviewUrls: Array.isArray(item.clipPreviewUrls) ? item.clipPreviewUrls : [],
+        imageSourceReport: normalizeImageSourceReport(item.imageSourceReport),
         updatedAt: Number(item.updatedAt || Date.now()),
         createdAt: Number(item.createdAt || Date.now())
       }))
@@ -1460,18 +1769,29 @@ async function removeJob(jobId) {
 }
 
 onMounted(async () => {
-  restoreJobSnapshot()
-  await Promise.all([loadModels(), loadVoices(), loadRefImages()])
-  await loadBgmLibrary()
-  await loadBgmStatus()
-  await syncJobsFromBackend({ activateLatest: true })
-  if (jobs.value.length) {
-    startPolling()
+  if (typeof window !== 'undefined') {
+    activePage.value = resolvePageFromPath()
+    setPagePath(activePage.value, { replace: true })
+    window.addEventListener('popstate', handleLocationChange)
+    window.addEventListener(WORKSPACE_AUTH_REQUIRED_EVENT, handleWorkspaceAuthRequired)
+  }
+
+  const workspaceReady = await refreshWorkspaceAuthStatus({ silent: true })
+
+  if (activePage.value === PAGE_WORKSPACE && workspaceReady) {
+    await bootstrapWorkspaceData()
+  }
+  if (activePage.value === PAGE_FINAL_VIDEOS) {
+    await loadFinalVideos({ silent: true })
   }
 })
 
 onUnmounted(() => {
   stopPolling()
+  if (typeof window !== 'undefined') {
+    window.removeEventListener('popstate', handleLocationChange)
+    window.removeEventListener(WORKSPACE_AUTH_REQUIRED_EVENT, handleWorkspaceAuthRequired)
+  }
 })
 </script>
 
@@ -1481,6 +1801,41 @@ onUnmounted(() => {
       <h1>{{ t('app.title') }}</h1>
       <p>{{ t('app.subtitle') }}</p>
     </header>
+
+    <div class="page-nav">
+      <el-button :type="activePage === PAGE_WORKSPACE ? 'primary' : 'default'" @click="switchPage(PAGE_WORKSPACE)">
+        {{ t('page.workspace') }}
+      </el-button>
+      <el-button :type="activePage === PAGE_FINAL_VIDEOS ? 'primary' : 'default'" @click="switchPage(PAGE_FINAL_VIDEOS)">
+        {{ t('page.finalVideos') }}
+      </el-button>
+      <el-button v-if="workspaceAuthRequired && workspaceUnlocked" @click="logoutWorkspace">
+        {{ t('action.workspaceLogout') }}
+      </el-button>
+    </div>
+
+    <template v-if="activePage === PAGE_WORKSPACE">
+    <template v-if="workspaceLocked">
+      <section class="card">
+        <h2>{{ t('section.workspaceAuth') }}</h2>
+        <p class="muted">{{ t('hint.workspaceLocked') }}</p>
+        <div class="job-restore-row">
+          <el-input
+            v-model="workspacePasswordInput"
+            :placeholder="t('placeholder.workspacePassword')"
+            show-password
+            style="max-width: 360px"
+            @keyup.enter.prevent="submitWorkspacePassword"
+          />
+          <el-button type="primary" :loading="workspaceAuthLoading" @click="submitWorkspacePassword">
+            {{ t('action.workspaceLogin') }}
+          </el-button>
+        </div>
+        <p v-if="workspaceAuthError" class="muted">{{ workspaceAuthError }}</p>
+      </section>
+    </template>
+
+    <template v-else>
 
     <section class="card">
       <h2>{{ t('section.config') }}</h2>
@@ -1881,6 +2236,7 @@ onUnmounted(() => {
               <span>·</span>
               <span>{{ Math.round((Number(item.progress || 0) * 100)) }}%</span>
               <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
+              <span>· {{ t('hint.jobCreatedAt', { time: formatDateTime(item.createdAt) }) }}</span>
             </div>
           </div>
           <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
@@ -1933,6 +2289,22 @@ onUnmounted(() => {
 
       <div v-if="job.videoUrl" class="preview">
         <h3>{{ t('hint.finalVideo') }}</h3>
+        <p v-if="imageSourceSummary" class="muted">
+          {{ t('hint.imageSourceReportSummary', {
+            cache: imageSourceSummary.cache_images,
+            generated: imageSourceSummary.generated_images,
+            total: imageSourceSummary.total_images,
+            cacheRatio: imageSourceSummary.cacheRatioText,
+            generatedRatio: imageSourceSummary.generatedRatioText
+          }) }}
+        </p>
+        <p v-if="imageSourceSummary && imageSourceSummary.other_images > 0" class="muted">
+          {{ t('hint.imageSourceReportOther', {
+            other: imageSourceSummary.other_images,
+            total: imageSourceSummary.total_images,
+            otherRatio: imageSourceSummary.otherRatioText
+          }) }}
+        </p>
         <video :src="job.videoUrl" controls preload="metadata" class="video" />
         <a :href="job.videoUrl" target="_blank" rel="noopener noreferrer">{{ t('action.downloadFinal') }}</a>
       </div>
@@ -1945,6 +2317,50 @@ onUnmounted(() => {
       </div>
       <pre class="logs">{{ backendLogs.join('\n') }}</pre>
     </section>
+
+    </template>
+    </template>
+
+    <template v-else>
+      <section class="card">
+        <h2>{{ t('section.finalVideos') }}</h2>
+        <div class="actions">
+          <el-button :loading="loading.finalVideos" @click="loadFinalVideos">{{ t('action.refreshFinalVideos') }}</el-button>
+        </div>
+
+        <div v-if="finalVideos.length" class="final-video-grid">
+          <article v-for="(item, index) in finalVideos" :key="item.filename" class="final-video-item">
+            <div
+              v-if="!isFinalVideoEnabled(item, index)"
+              class="clip-thumb-wrap"
+              role="button"
+              tabindex="0"
+              @click="enableFinalVideo(item, index)"
+              @keydown.enter.prevent="enableFinalVideo(item, index)"
+            >
+              <img :src="item.thumbnailUrl" class="final-video-thumb" loading="lazy" :alt="item.filename" />
+              <div class="clip-thumb-play">▶</div>
+            </div>
+            <video
+              v-else
+              :src="item.videoUrl"
+              :poster="item.thumbnailUrl"
+              controls
+              preload="none"
+              class="video"
+            />
+            <div class="final-video-name">{{ item.filename }}</div>
+            <div class="muted">{{ t('hint.finalVideoCreatedAt', { time: formatDateTime(item.createdAt) }) }}</div>
+            <div class="muted">{{ t('hint.finalVideoSize', { size: formatFileSize(item.size) }) }}</div>
+            <div class="actions">
+              <el-button text @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
+              <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+            </div>
+          </article>
+        </div>
+        <el-empty v-else :description="t('hint.noFinalVideos')" />
+      </section>
+    </template>
 
     <el-dialog
       v-model="refPicker.visible"

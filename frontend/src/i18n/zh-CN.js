@@ -238,4 +238,66 @@ Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
   tooManySegmentsReduce: '先去减少段数'
 })
 
+Object.assign(zhCN.hint, {
+  imageSourceReportSummary: '生图来源统计：缓存 {cache}/{total}（{cacheRatio}）｜新生成 {generated}/{total}（{generatedRatio}）',
+  imageSourceReportOther: '其他来源 {other}/{total}（{otherRatio}）'
+})
+
+Object.assign(zhCN.page || (zhCN.page = {}), {
+  workspace: '生成工作台',
+  finalVideos: '成片库'
+})
+
+Object.assign(zhCN.section, {
+  finalVideos: '最终视频列表'
+})
+
+Object.assign(zhCN.action, {
+  refreshFinalVideos: '刷新成片列表',
+  openFinalVideo: '查看视频'
+})
+
+Object.assign(zhCN.hint, {
+  noFinalVideos: '暂无最终视频',
+  finalVideoCreatedAt: '创建时间：{time}',
+  finalVideoSize: '文件大小：{size}'
+})
+
+Object.assign(zhCN.toast, {
+  finalVideosLoadFailed: '加载最终视频列表失败：{error}'
+})
+
+Object.assign(zhCN.section, {
+  workspaceAuth: '工作台访问验证'
+})
+
+Object.assign(zhCN.action, {
+  workspaceLogin: '进入工作台'
+})
+
+Object.assign(zhCN.action, {
+  workspaceLogout: '退出工作台'
+})
+
+Object.assign(zhCN.placeholder, {
+  workspacePassword: '请输入工作台密码'
+})
+
+Object.assign(zhCN.hint, {
+  workspaceLocked: '已启用工作台密码保护。请输入密码后再加载工作台数据。'
+})
+
+Object.assign(zhCN.toast, {
+  workspacePasswordRequired: '请输入工作台密码',
+  workspacePasswordInvalid: '缓存密码无效，请重新输入',
+  workspaceLoginFailed: '工作台登录失败：{error}',
+  workspaceAuthStatusFailed: '获取工作台鉴权状态失败：{error}',
+  workspaceSessionExpired: '工作台登录已失效，请重新输入密码',
+  workspaceLoggedOut: '已退出工作台'
+})
+
+Object.assign(zhCN.hint, {
+  jobCreatedAt: '创建时间：{time}'
+})
+
 export default zhCN
