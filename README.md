@@ -81,12 +81,17 @@ Default: `http://localhost:8000`
 - `GET /api/tts/voices`
 - `GET /api/logs/tail?lines=200`
 - `POST /api/analyze-characters`
+- `POST /api/generate-novel-aliases`
 - `POST /api/confirm-characters`
 - `POST /api/segment-text`
 - `GET /api/character-reference-images`
 - `POST /api/character-reference-images/upload`
 - `POST /api/character-reference-images/generate`
 - `POST /api/bgm/upload`
+- `POST /api/watermark/upload`
+- `GET /api/bgm/library`
+- `POST /api/bgm/select`
+- `DELETE /api/bgm/current`
 - `GET /api/bgm`
 - `POST /api/generate-video`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
