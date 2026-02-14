@@ -2501,22 +2501,18 @@ onUnmounted(() => {
 
           <div>
             <label>{{ t('field.mainCharacter') }}</label>
-            <el-checkbox
+            <el-switch
               :model-value="!!character.is_main_character"
               @change="(value) => setMainCharacter(index, value)"
-            >
-              {{ t('field.mainCharacter') }}
-            </el-checkbox>
+            />
           </div>
 
           <div>
             <label>{{ t('field.storySelf') }}</label>
-            <el-checkbox
+            <el-switch
               :model-value="!!character.is_story_self"
               @change="(value) => setStorySelf(index, value)"
-            >
-              {{ t('field.storySelf') }}
-            </el-checkbox>
+            />
           </div>
 
           <div>

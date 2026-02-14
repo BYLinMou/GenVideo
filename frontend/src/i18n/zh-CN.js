@@ -302,7 +302,7 @@ Object.assign(zhCN.hint, {
 
 Object.assign(zhCN.field, {
   mainCharacter: '主角',
-  storySelf: '“我”角色'
+  storySelf: '第一人称'
 })
 
 export default zhCN
