@@ -120,6 +120,8 @@ class JobStore:
             clip_count=clip_count,
             clip_preview_urls=previews,
             image_source_report=image_source_report,
+            created_at=str(row["created_at"]) if "created_at" in row.keys() and row["created_at"] else None,
+            updated_at=str(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else None,
         )
 
     def set(self, status: JobStatus) -> None:
@@ -177,7 +179,8 @@ class JobStore:
                         job_id, status, progress, step, message,
                         current_segment, total_segments,
                         output_video_url, output_video_path,
-                        clip_count, clip_preview_urls_json, image_source_report_json
+                        clip_count, clip_preview_urls_json, image_source_report_json,
+                        created_at, updated_at
                     FROM jobs
                     WHERE job_id = ?
                     """,
@@ -197,9 +200,10 @@ class JobStore:
                         job_id, status, progress, step, message,
                         current_segment, total_segments,
                         output_video_url, output_video_path,
-                        clip_count, clip_preview_urls_json, image_source_report_json
+                        clip_count, clip_preview_urls_json, image_source_report_json,
+                        created_at, updated_at
                     FROM jobs
-                    ORDER BY updated_at DESC
+                    ORDER BY created_at DESC, updated_at DESC
                     LIMIT ?
                     """,
                     (safe_limit,),

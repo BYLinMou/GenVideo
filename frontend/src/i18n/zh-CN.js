@@ -296,4 +296,8 @@ Object.assign(zhCN.toast, {
   workspaceLoggedOut: '已退出工作台'
 })
 
+Object.assign(zhCN.hint, {
+  jobCreatedAt: '创建时间：{time}'
+})
+
 export default zhCN

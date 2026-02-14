@@ -908,6 +908,16 @@ function formatDateTime(value) {
   return parsed.toLocaleString()
 }
 
+function parseApiTimeToMs(raw) {
+  if (raw == null) return null
+  const text = String(raw).trim()
+  if (!text) return null
+  const parsed = new Date(text)
+  const ms = parsed.getTime()
+  if (!Number.isFinite(ms) || Number.isNaN(ms)) return null
+  return ms
+}
+
 async function switchPage(page) {
   const next = page === PAGE_FINAL_VIDEOS ? PAGE_FINAL_VIDEOS : PAGE_WORKSPACE
   activePage.value = next
@@ -952,6 +962,8 @@ function selectJob(jobId) {
 function syncActiveJobRecordFromApiStatus(jobId, status) {
   const id = String(jobId || '')
   if (!id || !status) return null
+  const createdAtMs = parseApiTimeToMs(status.created_at)
+  const updatedAtMs = parseApiTimeToMs(status.updated_at)
   const next = {
     id,
     status: status.status || '',
@@ -963,7 +975,8 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
     imageSourceReport: normalizeImageSourceReport(status.image_source_report),
     videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
-    updatedAt: Date.now()
+    updatedAt: updatedAtMs || Date.now(),
+    createdAt: createdAtMs || undefined
   }
   upsertJobRecord(next)
   if (activeJobId.value === id) {
@@ -2201,6 +2214,7 @@ onUnmounted(() => {
               <span>·</span>
               <span>{{ Math.round((Number(item.progress || 0) * 100)) }}%</span>
               <span v-if="item.totalSegments">· Scene {{ item.currentSegment || 0 }}/{{ item.totalSegments }}</span>
+              <span>· {{ t('hint.jobCreatedAt', { time: formatDateTime(item.createdAt) }) }}</span>
             </div>
           </div>
           <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
