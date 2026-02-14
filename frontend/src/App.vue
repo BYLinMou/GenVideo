@@ -1156,6 +1156,13 @@ function resolveRefImageUrl(image) {
   }
 }
 
+function withImageCacheBust(url) {
+  const text = String(url || '').trim()
+  if (!text) return ''
+  const separator = text.includes('?') ? '&' : '?'
+  return `${text}${separator}t=${Date.now()}`
+}
+
 function pickRefImage(image) {
   const target = characters.value[refPicker.characterIndex]
   if (!target) return
@@ -1493,7 +1500,7 @@ async function uploadRefImage(event, character) {
   try {
     const created = await api.uploadCharacterRefImage(file)
     character.reference_image_path = created.path
-    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
+    character.reference_image_url = withImageCacheBust(created.url || api.getCharacterRefImageUrl(created.path))
     await loadRefImages()
     ElMessage.success(t('toast.uploadSuccess'))
   } catch (error) {
@@ -1536,7 +1543,7 @@ async function generateRefImage(character, index) {
       resolution: '768x768'
     })
     character.reference_image_path = created.path
-    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
+    character.reference_image_url = withImageCacheBust(created.url || api.getCharacterRefImageUrl(created.path))
     await loadRefImages()
     ElMessage.success(t('toast.refGenerated'))
   } catch (error) {

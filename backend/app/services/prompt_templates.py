@@ -7,7 +7,7 @@ DEFAULT_IMAGE_PROMPT = "Generate one single image based on the current plot segm
 
 CHARACTER_REFERENCE_FULL_BODY_RULES = (
     "Character reference sheet style. "
-    "2D Japanese anime style, clean line art, cel shading, non-photorealistic. "
+    "2D anime style, clean line art, cel shading, non-photorealistic. "
     "Show only one character (the target character) in the image. "
     "No other people, no crowd, no background characters, no extra faces. "
     "Must show full body from head to toe in frame. "
@@ -20,7 +20,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Keep facial identity consistent across scenes; hairstyle and outfit may change when required by the current segment.",
     "Character appearance is optional per frame: LLM may output pure scene/environment frame when segment focus is on place/atmosphere/system message.",
     "Reference image (if present) is for character look only, never for scene/background.",
-    "Prefer 2D Japanese anime style, clean line art and cel shading; avoid photorealistic or 3D-render look.",
+    "Prefer 2D anime style, clean line art and cel shading; avoid photorealistic or 3D-render look.",
     "If multiple reference images are provided, this segment may involve multiple characters. Keep each identity consistent.",
     "Scene/background/action must be inferred from current segment text.",
     "If story_world_context is provided, keep era/architecture/costume/props/culture consistent with that world setting.",
@@ -29,6 +29,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
     "Location must be concrete place if present (e.g. classroom, corridor, street).",
     "Scene elements must be concrete visual nouns/background details.",
+    "If any visible words/labels/signage/onomatopoeia are used in the image, they must use English letters only.",
     "No markdown, no explanation.",
 )
 
@@ -105,7 +106,8 @@ def build_fallback_segment_image_prompt(guard: str, scene_text: str, story_world
         f"{scene_text}. "
         "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
         "Background and action must come from the current plot segment. "
-        "2D Japanese anime style, clean line art, cel shading, expressive eyes, cinematic illustration, detailed lighting, clean composition, non-photorealistic, no 3D render, no text, no watermark"
+        "2D anime style, clean line art, cel shading, expressive eyes, cinematic illustration, detailed lighting, clean composition, non-photorealistic, no 3D render, no watermark. "
+        "If adding any visible text or onomatopoeia, use English letters only."
     )
 
 
@@ -126,7 +128,8 @@ def build_final_segment_image_prompt(
         f"Current plot segment: {scene_text}. "
         "If character is not necessary for this segment, you may generate scene-only frame. "
         "Scene/background/action must follow current plot segment. "
-        f"Additional style and composition details: {candidate}"
+        f"Additional style and composition details: {candidate}. "
+        "If any visible text appears in frame (signs, SFX, labels), it must use English letters only."
     )
 
 
@@ -190,5 +193,6 @@ def build_character_reference_prompt(prompt: str) -> str:
 def build_image_retry_prompt(prompt: str) -> str:
     return (
         "Create one single image only. Do not explain. "
-        f"2D Japanese anime style, clean line art, cel shading, expressive eyes, non-photorealistic, no 3D render. Illustration based on this description: {prompt}"
+        "If any visible text appears in frame, use English letters only. "
+        f"2D anime style, clean line art, cel shading, expressive eyes, non-photorealistic, no 3D render. Illustration based on this description: {prompt}"
     )
