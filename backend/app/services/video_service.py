@@ -577,6 +577,64 @@ def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int =
     return output
 
 
+def _normalize_character_name_key(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "")).strip().lower()
+
+
+def _normalize_path_key(value: str) -> str:
+    return str(value or "").replace("\\", "/").strip().lower()
+
+
+def _extract_entry_character_profile(entry: dict) -> tuple[str, set[str]]:
+    match_profile = entry.get("match_profile") if isinstance(entry.get("match_profile"), dict) else {}
+    descriptor = entry.get("descriptor") if isinstance(entry.get("descriptor"), dict) else {}
+
+    character_name = _normalize_character_name_key(
+        str(match_profile.get("character_name") or descriptor.get("character_name") or "")
+    )
+
+    reference_paths: set[str] = set()
+    for source in (match_profile, descriptor):
+        paths = source.get("reference_image_paths") if isinstance(source, dict) else []
+        if isinstance(paths, list):
+            for raw in paths:
+                key = _normalize_path_key(str(raw or ""))
+                if key:
+                    reference_paths.add(key)
+        single = _normalize_path_key(str((source.get("reference_image_path") if isinstance(source, dict) else "") or ""))
+        if single:
+            reference_paths.add(single)
+
+    return character_name, reference_paths
+
+
+def _pick_random_current_character_cache_entry(
+    character: CharacterSuggestion,
+    disallow_entry_ids: set[str] | None = None,
+) -> dict | None:
+    candidates = list_scene_cache_entries(disallow_entry_ids)
+    if not candidates:
+        return None
+
+    target_name = _normalize_character_name_key(character.name or "")
+    target_ref_path = _normalize_path_key(character.reference_image_path or "")
+
+    matched: list[dict] = []
+    for item in candidates:
+        image_path = Path(str(item.get("image_path") or ""))
+        if not image_path.exists():
+            continue
+        entry_name, entry_ref_paths = _extract_entry_character_profile(item)
+        name_match = bool(target_name) and entry_name == target_name
+        ref_match = bool(target_ref_path) and target_ref_path in entry_ref_paths
+        if name_match or ref_match:
+            matched.append(item)
+
+    if not matched:
+        return None
+    return random.choice(matched)
+
+
 def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_voice: str = _NARRATOR_VOICE_ID) -> list[CharacterSuggestion]:
     if not characters:
         return []
@@ -1427,6 +1485,7 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
         normalized.get("cache", 0)
         + normalized.get("fallback_llm", 0)
         + normalized.get("fallback_cache", 0)
+        + normalized.get("fallback_character_cache", 0)
         + normalized.get("fallback_random_cache", 0)
     )
     generated_images = normalized.get("generated", 0)
@@ -1553,24 +1612,24 @@ async def _resolve_segment_image(
             )
             return reused, "fallback-llm", str(forced_llm_pick.get("entry_id") or "") or None
 
-        fallback_matched = await find_reusable_scene_image(
-            scene_descriptor=descriptor,
-            model_id=payload.model_id,
-            disallow_entry_ids=recent_reuse_entry_ids,
+        character_random_entry = await run_in_threadpool(
+            _pick_random_current_character_cache_entry,
+            character,
+            recent_reuse_entry_ids,
         )
-        if fallback_matched and fallback_matched.get("image_path"):
+        if character_random_entry and character_random_entry.get("image_path"):
             reused = await run_in_threadpool(
                 render_cached_image_to_output,
-                fallback_matched["image_path"],
+                character_random_entry["image_path"],
                 image_path,
                 resolution,
             )
-            logger.info(
-                "Scene fallback cache hit (%s): reason=%s",
-                fallback_matched.get("match_type"),
-                fallback_matched.get("reason") or "",
+            logger.warning(
+                "Scene fallback used random cache image for current character: entry_id=%s character=%s",
+                character_random_entry.get("id"),
+                character.name,
             )
-            return reused, "fallback-cache", str(fallback_matched.get("entry_id") or "") or None
+            return reused, "fallback-character-cache", str(character_random_entry.get("id") or "") or None
 
         ref_path = Path(character.reference_image_path or "") if character.reference_image_path else None
         if ref_path and ref_path.exists() and ref_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -1619,6 +1678,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "generated": 0,
         "fallback_llm": 0,
         "fallback_cache": 0,
+        "fallback_character_cache": 0,
         "fallback_reference": 0,
         "fallback_random_cache": 0,
         "other": 0,
@@ -1768,6 +1828,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "generated": "generated",
                 "fallback-llm": "fallback_llm",
                 "fallback-cache": "fallback_cache",
+                "fallback-character-cache": "fallback_character_cache",
                 "fallback-reference": "fallback_reference",
                 "fallback-random-cache": "fallback_random_cache",
             }
