@@ -32,6 +32,9 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "Action must be concrete visible action (e.g. holding knife, raising right hand, running).",
     "Location must be concrete place if present (e.g. classroom, corridor, street).",
     "Scene elements must be concrete visual nouns/background details.",
+    "English onomatopoeia is allowed when visually appropriate.",
+    "Environmental/prop text is allowed only when naturally required by the scene (e.g. signs, labels).",
+    "Do not add speech bubbles, dialogue balloons, subtitle-like dialogue text, or character conversation captions.",
     "If any visible words/labels/signage/onomatopoeia are used in the image, they must use English letters only.",
     "No markdown, no explanation.",
 )
@@ -110,6 +113,8 @@ def build_fallback_segment_image_prompt(guard: str, scene_text: str, story_world
         "It is allowed to output a pure scene/environment shot without any character when that better matches the segment. "
         "Background and action must come from the current plot segment. "
         "2D anime style, clean line art, cel shading, expressive eyes, cinematic illustration, detailed lighting, clean composition, non-photorealistic, no 3D render, no watermark. "
+        "English onomatopoeia is allowed when visually appropriate, and required environmental text/signage is allowed. "
+        "Do not add speech bubbles, dialogue balloons, subtitle-like dialogue text, or character conversation captions. "
         "If adding any visible text or onomatopoeia, use English letters only."
     )
 
@@ -132,6 +137,8 @@ def build_final_segment_image_prompt(
         "If character is not necessary for this segment, you may generate scene-only frame. "
         "Scene/background/action must follow current plot segment. "
         f"Additional style and composition details: {candidate}. "
+        "English onomatopoeia is allowed when visually appropriate, and required environmental text/signage is allowed. "
+        "Do not add speech bubbles, dialogue balloons, subtitle-like dialogue text, or character conversation captions. "
         "If any visible text appears in frame (signs, SFX, labels), it must use English letters only."
     )
 
@@ -200,6 +207,8 @@ def build_character_reference_prompt(prompt: str) -> str:
 def build_image_retry_prompt(prompt: str) -> str:
     return (
         "Create one single image only. Do not explain. "
+        "English onomatopoeia is allowed when visually appropriate, and required environmental text/signage is allowed. "
+        "Do not add speech bubbles, dialogue balloons, subtitle-like dialogue text, or character conversation captions. "
         "If any visible text appears in frame, use English letters only. "
         f"2D anime style, clean line art, cel shading, expressive eyes, non-photorealistic, no 3D render. Illustration based on this description: {prompt}"
     )
