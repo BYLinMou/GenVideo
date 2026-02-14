@@ -784,6 +784,39 @@ def _pick_random_current_character_cache_entry(
     return random.choice(matched)
 
 
+def _entry_is_scene_only(entry: dict) -> bool:
+    match_profile = entry.get("match_profile") if isinstance(entry.get("match_profile"), dict) else {}
+    descriptor = entry.get("descriptor") if isinstance(entry.get("descriptor"), dict) else {}
+
+    raw = match_profile.get("is_scene_only", descriptor.get("is_scene_only", False))
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    text = str(raw or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _pick_random_scene_only_cache_entry(
+    disallow_entry_ids: set[str] | None = None,
+) -> dict | None:
+    candidates = list_scene_cache_entries(disallow_entry_ids)
+    if not candidates:
+        return None
+
+    matched: list[dict] = []
+    for item in candidates:
+        image_path = Path(str(item.get("image_path") or ""))
+        if not image_path.exists():
+            continue
+        if _entry_is_scene_only(item):
+            matched.append(item)
+
+    if not matched:
+        return None
+    return random.choice(matched)
+
+
 def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_voice: str = _NARRATOR_VOICE_ID) -> list[CharacterSuggestion]:
     if not characters:
         return []
@@ -1635,6 +1668,7 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
         + normalized.get("fallback_llm", 0)
         + normalized.get("fallback_cache", 0)
         + normalized.get("fallback_character_cache", 0)
+        + normalized.get("fallback_scene_only_cache", 0)
         + normalized.get("fallback_random_cache", 0)
     )
     generated_images = normalized.get("generated", 0)
@@ -1823,6 +1857,20 @@ async def _resolve_segment_image(
             logger.warning("Scene fallback used character reference image")
             return reused, "fallback-reference", None
 
+        scene_only_entry = await run_in_threadpool(
+            _pick_random_scene_only_cache_entry,
+            recent_reuse_entry_ids,
+        )
+        if scene_only_entry and scene_only_entry.get("image_path"):
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                scene_only_entry["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.warning("Scene fallback used random scene-only cached image: entry_id=%s", scene_only_entry.get("id"))
+            return reused, "fallback-scene-only-cache", str(scene_only_entry.get("id") or "") or None
+
         candidates = await run_in_threadpool(list_scene_cache_entries, recent_reuse_entry_ids)
         if candidates:
             selected = random.choice(candidates)
@@ -1860,6 +1908,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "fallback_llm": 0,
         "fallback_cache": 0,
         "fallback_character_cache": 0,
+        "fallback_scene_only_cache": 0,
         "fallback_reference": 0,
         "fallback_random_cache": 0,
         "other": 0,
@@ -2064,6 +2113,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "fallback-llm": "fallback_llm",
                 "fallback-cache": "fallback_cache",
                 "fallback-character-cache": "fallback_character_cache",
+                "fallback-scene-only-cache": "fallback_scene_only_cache",
                 "fallback-reference": "fallback_reference",
                 "fallback-random-cache": "fallback_random_cache",
             }
