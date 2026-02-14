@@ -901,11 +901,33 @@ async function logoutWorkspace() {
 }
 
 function formatDateTime(value) {
-  const text = String(value || '').trim()
-  if (!text) return '-'
-  const parsed = new Date(text)
-  if (Number.isNaN(parsed.getTime())) return text
-  return parsed.toLocaleString()
+  if (value == null) return '-'
+
+  let timestamp = null
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    timestamp = value
+  } else {
+    const text = String(value || '').trim()
+    if (!text) return '-'
+
+    if (/^-?\d+$/.test(text)) {
+      const numeric = Number(text)
+      if (Number.isFinite(numeric)) {
+        timestamp = numeric
+      }
+    }
+
+    if (timestamp == null) {
+      const parsed = new Date(text)
+      if (Number.isNaN(parsed.getTime())) return text
+      timestamp = parsed.getTime()
+    }
+  }
+
+  const normalized = Math.abs(timestamp) < 100000000000 ? timestamp * 1000 : timestamp
+  const result = new Date(normalized)
+  if (Number.isNaN(result.getTime())) return String(value)
+  return result.toLocaleString()
 }
 
 function parseApiTimeToMs(raw) {
