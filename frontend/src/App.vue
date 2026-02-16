@@ -444,6 +444,11 @@ function buildWorkspaceDraftPayload() {
     confidence: Number(confidence.value || 0),
     form: formSnapshot,
     characters: (characters.value || []).map((item) => normalizeDraftCharacter(item)).filter(Boolean),
+    manualReplace: {
+      find: String(manualReplace.find || ''),
+      replace: String(manualReplace.replace || ''),
+      caseSensitive: Boolean(manualReplace.caseSensitive)
+    },
     nameReplace: {
       enabled: Boolean(nameReplace.enabled),
       maxCandidates: Math.max(1, Number(nameReplace.maxCandidates || 24))
@@ -524,6 +529,11 @@ function restoreWorkspaceDraft() {
     const savedConfidence = Number(parsed.confidence)
     confidence.value = Number.isFinite(savedConfidence) ? savedConfidence : 0
 
+    const savedManualReplace = parsed.manualReplace && typeof parsed.manualReplace === 'object' ? parsed.manualReplace : {}
+    manualReplace.find = String(savedManualReplace.find || '')
+    manualReplace.replace = String(savedManualReplace.replace || '')
+    manualReplace.caseSensitive = Boolean(savedManualReplace.caseSensitive)
+
     const savedNameReplace = parsed.nameReplace && typeof parsed.nameReplace === 'object' ? parsed.nameReplace : {}
     nameReplace.enabled = Boolean(savedNameReplace.enabled)
     const maxCandidates = Number(savedNameReplace.maxCandidates)
@@ -557,6 +567,12 @@ const nameReplace = reactive({
 const replacementEntries = ref([])
 const novelAliases = ref([])
 const customAliasInput = ref('')
+
+const manualReplace = reactive({
+  find: '',
+  replace: '',
+  caseSensitive: false
+})
 
 const replacementEnabledCount = computed(() => {
   return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
@@ -829,6 +845,37 @@ function applyReplacementsToSourceText() {
 
   form.text = transformed
   ElMessage.success(t('toast.replacementApplied'))
+}
+
+function applyManualReplaceAll() {
+  const source = String(form.text || '')
+  if (!source.trim()) {
+    ElMessage.warning(t('toast.textRequired'))
+    return
+  }
+
+  const findText = String(manualReplace.find || '')
+  if (!findText.trim()) {
+    ElMessage.warning(t('toast.manualReplaceFindRequired'))
+    return
+  }
+
+  const replaceText = String(manualReplace.replace || '')
+  const flags = manualReplace.caseSensitive ? 'g' : 'gi'
+  const pattern = new RegExp(escapeRegExp(findText), flags)
+  let replacedCount = 0
+  const transformed = source.replace(pattern, () => {
+    replacedCount += 1
+    return replaceText
+  })
+
+  if (!replacedCount) {
+    ElMessage.info(t('toast.manualReplaceNoMatch'))
+    return
+  }
+
+  form.text = transformed
+  ElMessage.success(t('toast.manualReplaceApplied', { count: replacedCount }))
 }
 
 function resetJob() {
@@ -2118,6 +2165,14 @@ watch(
 )
 
 watch(
+  manualReplace,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(
   novelAliases,
   () => {
     schedulePersistWorkspaceDraft()
@@ -2439,6 +2494,24 @@ onUnmounted(() => {
           <span class="arrow">→</span>
           <el-input v-model="entry.replacement" :placeholder="t('placeholder.replacementTarget')" clearable @input="syncReplacementEntry(entry)" />
         </div>
+      </div>
+
+      <div class="manual-replace-toolbar">
+        <el-input
+          v-model="manualReplace.find"
+          :placeholder="t('placeholder.manualFind')"
+          clearable
+        />
+        <el-input
+          v-model="manualReplace.replace"
+          :placeholder="t('placeholder.manualReplace')"
+          clearable
+        />
+        <div class="manual-replace-switch">
+          <el-switch v-model="manualReplace.caseSensitive" />
+          <span>{{ t('field.manualReplaceCaseSensitive') }}</span>
+        </div>
+        <el-button type="primary" @click="applyManualReplaceAll">{{ t('action.manualReplaceAll') }}</el-button>
       </div>
 
       <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />

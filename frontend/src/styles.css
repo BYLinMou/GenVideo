@@ -96,6 +96,28 @@ label {
   gap: 8px;
 }
 
+.manual-replace-toolbar {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.manual-replace-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #344054;
+  white-space: nowrap;
+}
+
+@media (max-width: 920px) {
+  .manual-replace-toolbar {
+    grid-template-columns: 1fr;
+  }
+}
+
 .alias-list {
   margin-top: 10px;
   display: flex;

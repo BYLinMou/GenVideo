@@ -305,4 +305,25 @@ Object.assign(zhCN.field, {
   storySelf: '第一人称'
 })
 
+Object.assign(zhCN.field, {
+  manualFind: '查找',
+  manualReplace: '替换',
+  manualReplaceCaseSensitive: '区分大小写'
+})
+
+Object.assign(zhCN.placeholder, {
+  manualFind: '输入要查找的文本',
+  manualReplace: '输入替换后的文本'
+})
+
+Object.assign(zhCN.action, {
+  manualReplaceAll: '全部替换'
+})
+
+Object.assign(zhCN.toast, {
+  manualReplaceFindRequired: '请先输入要查找的文本',
+  manualReplaceNoMatch: '未找到匹配内容',
+  manualReplaceApplied: '已替换 {count} 处内容'
+})
+
 export default zhCN
