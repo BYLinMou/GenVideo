@@ -70,6 +70,7 @@ def build_smart_segmentation_prompt(clean_text: str) -> str:
     return (
         "Split the following novel text into short-video segments. "
         "Try to cut at scene transitions and keep semantic coherence. "
+        "Do not rewrite, summarize, omit, or reorder any content; preserve original wording exactly. "
         "Return strict JSON only in this schema: {\"segments\":[\"Segment 1\",\"Segment 2\"]}.\n\n"
         f"Text:\n{clean_text[:14000]}"
     )

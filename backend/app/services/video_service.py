@@ -1670,6 +1670,45 @@ def _cleanup_segment_artifacts(temp_root: Path, segment_index: int) -> None:
             logger.debug("Failed to cleanup artifact: %s", target)
 
 
+def _clip_has_audio_stream(clip_path: Path) -> bool:
+    ffprobe_bin = shutil.which("ffprobe")
+    if not ffprobe_bin:
+        return True
+
+    cmd = [
+        ffprobe_bin,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(clip_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception:
+        return False
+
+    if proc.returncode != 0:
+        return False
+    return "audio" in str(proc.stdout or "").lower()
+
+
+def _is_valid_clip_checkpoint(clip_path: Path, min_bytes: int = 8192) -> bool:
+    if not clip_path.exists() or not clip_path.is_file():
+        return False
+    try:
+        if int(clip_path.stat().st_size) < int(min_bytes):
+            return False
+    except Exception:
+        return False
+
+    return _clip_has_audio_stream(clip_path)
+
+
 def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> list[str]:
     clip_paths: list[str] = []
     total = max(0, int(total_segments or 0))
@@ -1677,6 +1716,8 @@ def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> lis
         clip_path = clip_root / f"clip_{index:04d}.mp4"
         if not clip_path.exists() or not clip_path.is_file():
             raise FileNotFoundError(f"Missing segment clip for compose: {clip_path}")
+        if not _clip_has_audio_stream(clip_path):
+            raise FileNotFoundError(f"Segment clip has no audio stream: {clip_path}")
         clip_paths.append(str(clip_path))
     return clip_paths
     try:
@@ -2043,22 +2084,29 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             clip_path = clip_root / f"clip_{index:04d}.mp4"
 
             if clip_path.exists() and clip_path.is_file():
-                rendered_clip_count += 1
-                completed_ratio = (index + 1) / max(total, 1)
-                _update_job(
-                    job_id,
-                    base_url,
-                    "running",
-                    stage_start + completed_ratio * stage_span,
-                    "render-segment",
-                    f"Scene {index + 1}/{total} resumed from checkpoint",
-                    current_segment=index + 1,
-                    total_segments=total,
-                    clip_count=rendered_clip_count,
-                )
-                _cleanup_segment_artifacts(temp_root, index)
-                gc.collect()
-                continue
+                if not _is_valid_clip_checkpoint(clip_path):
+                    logger.warning("Segment %s checkpoint clip invalid, regenerate: %s", index + 1, clip_path)
+                    try:
+                        clip_path.unlink(missing_ok=True)
+                    except Exception:
+                        logger.debug("Failed to remove invalid clip checkpoint: %s", clip_path)
+                else:
+                    rendered_clip_count += 1
+                    completed_ratio = (index + 1) / max(total, 1)
+                    _update_job(
+                        job_id,
+                        base_url,
+                        "running",
+                        stage_start + completed_ratio * stage_span,
+                        "render-segment",
+                        f"Scene {index + 1}/{total} resumed from checkpoint",
+                        current_segment=index + 1,
+                        total_segments=total,
+                        clip_count=rendered_clip_count,
+                    )
+                    _cleanup_segment_artifacts(temp_root, index)
+                    gc.collect()
+                    continue
 
             prompt_task = asyncio.create_task(
                 build_segment_image_bundle(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import json
 import logging
 import re
@@ -309,6 +310,15 @@ def segment_by_fixed(text: str, chunk_size: int = 120) -> list[str]:
     return [clean[index : index + chunk_size] for index in range(0, len(clean), chunk_size)]
 
 
+def _smart_segmentation_similarity(source_text: str, segments: list[str]) -> float:
+    source = re.sub(r"\s+", "", str(source_text or ""))
+    merged = re.sub(r"\s+", "", "".join(str(item or "") for item in (segments or [])))
+
+    if not source or not merged:
+        return 0.0
+    return float(SequenceMatcher(None, source, merged).ratio())
+
+
 async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
     clean_text = _normalize_segmentation_text(text)
     selected_model = model_id or settings.llm_default_model
@@ -339,7 +349,13 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
             if parsed and isinstance(parsed.get("segments"), list):
                 segments = [str(item).strip() for item in parsed["segments"] if str(item).strip()]
                 if segments:
-                    return segments
+                    similarity = _smart_segmentation_similarity(clean_text, segments)
+                    if similarity >= 0.9:
+                        return segments
+                    logger.warning(
+                        "Smart segmentation output diverged from source (similarity=%.3f), fallback to sentence groups",
+                        similarity,
+                    )
     except Exception:
         logger.exception("Smart segmentation failed, fallback to sentence groups")
 
