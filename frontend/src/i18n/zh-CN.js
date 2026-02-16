@@ -367,4 +367,12 @@ Object.assign(zhCN.hint, {
   imageSourceTagOther: '其他来源'
 })
 
+Object.assign(zhCN.placeholder, {
+  referenceImageSearch: '搜索参考图文件名'
+})
+
+Object.assign(zhCN.hint, {
+  noRefImageSearchResult: '没有匹配的参考图，请换个关键词。'
+})
+
 export default zhCN

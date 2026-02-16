@@ -343,6 +343,10 @@ label {
   padding: 4px;
 }
 
+.ref-picker-toolbar {
+  margin-bottom: 10px;
+}
+
 .model-option-label {
   display: inline-block;
   width: 100%;

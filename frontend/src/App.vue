@@ -391,9 +391,20 @@ const filteredModels = computed(() => {
   })
 })
 
+const filteredRefImages = computed(() => {
+  const keyword = String(refPicker.keyword || '').trim().toLowerCase()
+  if (!keyword) return refImages.value
+  return refImages.value.filter((item) => {
+    const filename = String(item?.filename || '').toLowerCase()
+    const path = String(item?.path || '').toLowerCase()
+    return filename.includes(keyword) || path.includes(keyword)
+  })
+})
+
 const refPicker = reactive({
   visible: false,
-  characterIndex: -1
+  characterIndex: -1,
+  keyword: ''
 })
 
 const bgmPicker = reactive({
@@ -1600,12 +1611,14 @@ function restoreJobSnapshot() {
 
 function openRefPicker(index) {
   refPicker.characterIndex = index
+  refPicker.keyword = ''
   refPicker.visible = true
 }
 
 function closeRefPicker() {
   refPicker.visible = false
   refPicker.characterIndex = -1
+  refPicker.keyword = ''
 }
 
 function openBgmPicker() {
@@ -3066,16 +3079,19 @@ onUnmounted(() => {
       v-model="refPicker.visible"
       :title="t('action.pickReference')"
       width="820px"
-      :close-on-click-modal="false"
+      :close-on-click-modal="true"
       @closed="closeRefPicker"
     >
-      <div class="ref-library-modal" v-if="refImages.length">
-        <div v-for="image in refImages" :key="image.path" class="ref-option" @click="pickRefImage(image)">
+      <div class="ref-picker-toolbar">
+        <el-input v-model="refPicker.keyword" clearable :placeholder="t('placeholder.referenceImageSearch')" />
+      </div>
+      <div class="ref-library-modal" v-if="filteredRefImages.length">
+        <div v-for="image in filteredRefImages" :key="image.path" class="ref-option" @click="pickRefImage(image)">
           <img :src="resolveRefImageUrl(image)" alt="ref" />
           <div class="filename">{{ image.filename }}</div>
         </div>
       </div>
-      <el-empty v-else :description="t('hint.noRefImage')" />
+      <el-empty v-else :description="refImages.length ? t('hint.noRefImageSearchResult') : t('hint.noRefImage')" />
       <template #footer>
         <el-button @click="closeRefPicker">{{ t('action.close') }}</el-button>
       </template>
