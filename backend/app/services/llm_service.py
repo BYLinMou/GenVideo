@@ -402,6 +402,56 @@ def _normalize_index_list(values: object, size: int, limit: int = 4) -> list[int
     return output
 
 
+def _normalize_sentence_speaker_plan(
+    values: object,
+    sentence_count: int,
+    candidate_count: int,
+    default_primary_index: int | None,
+) -> list[dict[str, object]]:
+    if sentence_count <= 0:
+        return []
+
+    raw_items = values if isinstance(values, list) else []
+    output: list[dict[str, object]] = []
+    seen_sentence_indexes: set[int] = set()
+
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+
+        sentence_index = _normalize_index(raw.get("sentence_index"), sentence_count)
+        if sentence_index is None or sentence_index in seen_sentence_indexes:
+            continue
+
+        character_index = _normalize_index(raw.get("character_index"), candidate_count)
+        speaker_type = _clean_text(str(raw.get("speaker_type", "")), 20).lower()
+        if speaker_type not in {"narrator", "character"}:
+            speaker_type = "character" if character_index is not None else "narrator"
+
+        if speaker_type == "character" and character_index is None:
+            character_index = _normalize_index(default_primary_index, candidate_count)
+
+        confidence = 0.0
+        try:
+            confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0) or 0.0)))
+        except Exception:
+            confidence = 0.0
+
+        output.append(
+            {
+                "sentence_index": sentence_index,
+                "speaker_type": speaker_type,
+                "character_index": character_index,
+                "confidence": confidence,
+                "reason": _clean_text(str(raw.get("reason", "")), 180),
+            }
+        )
+        seen_sentence_indexes.add(sentence_index)
+
+    output.sort(key=lambda item: int(item.get("sentence_index", 0)))
+    return output
+
+
 def _normalize_keyword_list(values: object, limit: int) -> list[str]:
     if isinstance(values, str):
         parts = re.split(r"[,，;；|/]", values)
@@ -571,6 +621,7 @@ def _fallback_segment_image_bundle(
             "confidence": 0.0,
             "reason": "fallback",
         },
+        "tts_sentence_plan": [],
     }
 
 
@@ -665,6 +716,11 @@ async def build_segment_image_bundle(
             "previous_segment": _clean_text(previous_segment_text, 500),
             "next_segment": _clean_text(next_segment_text, 500),
         },
+        "tts_sentence_units": [
+            {"sentence_index": index, "sentence_text": _clean_text(sentence, 260)}
+            for index, sentence in enumerate(split_sentences(segment_text))
+            if _clean_text(sentence, 260)
+        ][:32],
         "character_candidates": [
             {
                 "index": index,
@@ -686,6 +742,15 @@ async def build_segment_image_bundle(
             "related_indexes": [0, 1, 2, 3],
             "character_confidence": 0.0,
             "character_reason": "",
+            "sentence_speakers": [
+                {
+                    "sentence_index": 0,
+                    "speaker_type": "narrator",
+                    "character_index": None,
+                    "confidence": 0.0,
+                    "reason": "",
+                }
+            ],
             "prompt": "",
             "action_hint": "",
             "location_hint": "",
@@ -742,6 +807,14 @@ async def build_segment_image_bundle(
                     metadata["action_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("action_hint", "")
                 if not metadata.get("location_hint"):
                     metadata["location_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("location_hint", "")
+
+                sentence_count = len([item for item in request_body.get("tts_sentence_units", []) if isinstance(item, dict)])
+                sentence_plan = _normalize_sentence_speaker_plan(
+                    (parsed or {}).get("sentence_speakers"),
+                    sentence_count=sentence_count,
+                    candidate_count=len(candidates),
+                    default_primary_index=resolved_primary,
+                )
                 return {
                     "prompt": final_prompt,
                     "metadata": metadata,
@@ -751,6 +824,7 @@ async def build_segment_image_bundle(
                         "confidence": max(0.0, min(1.0, float((parsed or {}).get("character_confidence", 0.0) or 0.0))),
                         "reason": _clean_text(str((parsed or {}).get("character_reason", "")), 240),
                     },
+                    "tts_sentence_plan": sentence_plan,
                 }
     except Exception:
         logger.exception("LLM image prompt/metadata build failed, using fallback bundle")

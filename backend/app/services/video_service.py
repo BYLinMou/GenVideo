@@ -24,6 +24,7 @@ from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
+    split_sentences,
     summarize_story_world_context,
 )
 from .segmentation_service import build_segment_plan, resolve_precomputed_segments, select_segments_by_range
@@ -931,10 +932,61 @@ def _merge_tts_pieces(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return merged
 
 
-def _build_tts_pieces(text: str, characters: list[CharacterSuggestion], narrator_voice: str) -> list[tuple[str, str]]:
+def _build_tts_pieces(
+    text: str,
+    characters: list[CharacterSuggestion],
+    narrator_voice: str,
+    sentence_plan: list[dict] | None = None,
+) -> list[tuple[str, str]]:
     clean = (text or "").strip()
     if not clean:
         return []
+
+    if sentence_plan:
+        sentence_units = split_sentences(clean)
+        if sentence_units:
+            plan_by_index: dict[int, dict] = {}
+            for item in sentence_plan:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    sentence_index = int(item.get("sentence_index"))
+                except Exception:
+                    continue
+                if sentence_index < 0 or sentence_index >= len(sentence_units):
+                    continue
+                if sentence_index in plan_by_index:
+                    continue
+                plan_by_index[sentence_index] = item
+
+            planned_pieces: list[tuple[str, str]] = []
+            dialogue_index = 0
+            for sentence_index, sentence_text in enumerate(sentence_units):
+                plan_item = plan_by_index.get(sentence_index)
+                if not plan_item:
+                    planned_pieces.append((sentence_text, narrator_voice))
+                    continue
+
+                speaker_type = str(plan_item.get("speaker_type") or "narrator").strip().lower()
+                character_index = None
+                try:
+                    character_index = int(plan_item.get("character_index"))
+                except Exception:
+                    character_index = None
+
+                if speaker_type == "character":
+                    if character_index is not None and 0 <= character_index < len(characters):
+                        voice = (characters[character_index].voice_id or "").strip() or narrator_voice
+                    else:
+                        voice = _pick_dialogue_voice(characters, dialog_index, narrator_voice)
+                    dialogue_index += 1
+                    planned_pieces.append((sentence_text, voice))
+                else:
+                    planned_pieces.append((sentence_text, narrator_voice))
+
+            merged_planned = _merge_tts_pieces(planned_pieces)
+            if merged_planned:
+                return merged_planned
 
     quotes = _extract_quote_blocks(clean)
     if not quotes:
@@ -971,8 +1023,9 @@ async def _synthesize_segment_tts(
     characters: list[CharacterSuggestion],
     output_path: Path,
     narrator_voice: str = _NARRATOR_VOICE_ID,
+    sentence_plan: list[dict] | None = None,
 ) -> tuple[Path, float]:
-    parts = _build_tts_pieces(text, characters, narrator_voice)
+    parts = _build_tts_pieces(text, characters, narrator_voice, sentence_plan=sentence_plan)
     if not parts:
         return await synthesize_tts(text=text, voice=narrator_voice, output_path=output_path)
 
@@ -2122,18 +2175,10 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     default_related_indexes=default_related_indexes,
                 )
             )
-            audio_task = asyncio.create_task(
-                _synthesize_segment_tts(
-                    text=segment_text,
-                    characters=characters,
-                    output_path=audio_path,
-                    narrator_voice=_NARRATOR_VOICE_ID,
-                )
-            )
-
             prompt_bundle = await prompt_task
             prompt = str(prompt_bundle.get("prompt") or "").strip()
             scene_metadata = prompt_bundle.get("metadata") or {}
+            tts_sentence_plan = prompt_bundle.get("tts_sentence_plan") if isinstance(prompt_bundle.get("tts_sentence_plan"), list) else []
 
             assignment = prompt_bundle.get("character_assignment") if isinstance(prompt_bundle.get("character_assignment"), dict) else {}
             resolved_primary_index = _coerce_character_index(assignment.get("primary_index"), len(characters))
@@ -2178,6 +2223,15 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     image_path=image_path,
                     resolution=resolution,
                     recent_reuse_entry_ids=set(recent_scene_entry_ids),
+                )
+            )
+            audio_task = asyncio.create_task(
+                _synthesize_segment_tts(
+                    text=segment_text,
+                    characters=characters,
+                    output_path=audio_path,
+                    narrator_voice=_NARRATOR_VOICE_ID,
+                    sentence_plan=tts_sentence_plan,
                 )
             )
 
