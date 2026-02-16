@@ -436,9 +436,12 @@ function isGeneratingRef(character, index) {
 function normalizeDraftCharacter(item) {
   if (!item || typeof item !== 'object') return null
   const importance = Number(item.importance || 5)
+  const rawGender = String(item.gender || '').trim().toLowerCase()
+  const gender = rawGender === 'male' || rawGender === 'female' ? rawGender : 'unknown'
   return {
     name: String(item.name || '').trim(),
     role: String(item.role || 'supporting').trim() || 'supporting',
+    gender,
     importance: Math.max(1, Math.min(10, Number.isFinite(importance) ? importance : 5)),
     is_main_character: Boolean(item.is_main_character),
     is_story_self: Boolean(item.is_story_self),
@@ -654,6 +657,16 @@ function aspectRatioIconStyle(value) {
 
 function formatModelLabel(item) {
   return `${item.name} (${item.provider})${item.available ? '' : ` [${t('option.unavailable')}]`}`
+}
+
+function formatVoiceLabel(voice) {
+  const rawGender = String(voice?.gender || '').trim().toLowerCase()
+  const gender = rawGender === 'male' || rawGender === 'female' ? rawGender : 'unknown'
+  const genderLabel = gender === 'male' ? t('option.genderMale') : gender === 'female' ? t('option.genderFemale') : t('option.genderUnknown')
+  const description = String(voice?.description || '').trim()
+  return description
+    ? `${voice.name} (${voice.id}) · ${genderLabel} · ${description}`
+    : `${voice.name} (${voice.id}) · ${genderLabel}`
 }
 
 function handleModelFilter(query) {
@@ -1738,6 +1751,7 @@ async function runAnalyze() {
     })
     const normalizedCharacters = (data.characters || []).map((item) => ({
       ...item,
+      gender: String(item?.gender || 'unknown').trim().toLowerCase() === 'male' ? 'male' : String(item?.gender || 'unknown').trim().toLowerCase() === 'female' ? 'female' : 'unknown',
       is_main_character: Boolean(item?.is_main_character),
       is_story_self: Boolean(item?.is_story_self),
       reference_image_path: item.reference_image_path || '',
@@ -2808,6 +2822,15 @@ onUnmounted(() => {
           </div>
 
           <div>
+            <label>{{ t('field.gender') }}</label>
+            <el-select v-model="character.gender" style="width: 100%">
+              <el-option :label="t('option.genderUnknown')" value="unknown" />
+              <el-option :label="t('option.genderMale')" value="male" />
+              <el-option :label="t('option.genderFemale')" value="female" />
+            </el-select>
+          </div>
+
+          <div>
             <label>{{ t('field.mainCharacter') }}</label>
             <el-switch
               :model-value="!!character.is_main_character"
@@ -2826,7 +2849,7 @@ onUnmounted(() => {
           <div>
             <label>{{ t('field.voice') }}</label>
             <el-select v-model="character.voice_id" style="width: 100%">
-              <el-option v-for="voice in voices" :key="voice.id" :label="`${voice.name} (${voice.id})`" :value="voice.id" />
+              <el-option v-for="voice in voices" :key="voice.id" :label="formatVoiceLabel(voice)" :value="voice.id" />
             </el-select>
           </div>
 

@@ -115,6 +115,8 @@ Character identity fields (`CharacterSuggestion`):
 
 - `is_main_character` (bool): marks one main character
 - `is_story_self` (bool): marks the first-person narrator role (if the novel perspective is first-person)
+- `gender` (string): `male` / `female` / `unknown` for voice-style alignment hints
+- `voice_id` is treated as authoritative at runtime; segment TTS uses configured character voices by mapped speaker index
 - These fields are accepted in `POST /api/confirm-characters` and in `POST /api/generate-video` within `characters[]`
 
 ## Frontend

@@ -375,4 +375,14 @@ Object.assign(zhCN.hint, {
   noRefImageSearchResult: '没有匹配的参考图，请换个关键词。'
 })
 
+Object.assign(zhCN.field, {
+  gender: '性别'
+})
+
+Object.assign(zhCN.option, {
+  genderUnknown: '未知',
+  genderMale: '男',
+  genderFemale: '女'
+})
+
 export default zhCN

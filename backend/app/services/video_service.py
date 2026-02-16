@@ -60,6 +60,18 @@ _DIALOG_QUOTE_PAIRS = {
 }
 
 
+_VOICE_ID_TO_GENDER = {item.id: str(item.gender or "").strip().lower() for item in VOICE_INFOS}
+
+
+def _normalize_character_gender(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"male", "man", "m", "boy"}:
+        return "male"
+    if text in {"female", "woman", "f", "girl"}:
+        return "female"
+    return "unknown"
+
+
 def _ffmpeg_escape_text(text: str) -> str:
     value = (text or "").replace("\\", "\\\\")
     value = value.replace(":", "\\:").replace("'", "\\'")
@@ -854,32 +866,25 @@ def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_v
     if narrator_voice not in available:
         narrator_voice = available[0] if available else _NARRATOR_VOICE_ID
 
-    used: set[str] = {narrator_voice}
-    prioritized = sorted(
-        characters,
-        key=lambda item: int(item.importance or 0),
-        reverse=True,
-    )
-
-    for character in prioritized:
+    for character in characters:
         current = (character.voice_id or "").strip()
-        if current and current not in used and current in available:
-            used.add(current)
+        if current in available:
+            character.voice_id = current
             continue
 
-        recommended = recommend_voice(character.role or "", character.personality or "")
-        if recommended and recommended in available and recommended not in used:
+        gender = _normalize_character_gender(getattr(character, "gender", "unknown"))
+        recommended = recommend_voice(character.role or "", character.personality or "", gender_hint=gender)
+        if recommended in available:
             character.voice_id = recommended
-            used.add(recommended)
             continue
 
-        fallback = next((voice_id for voice_id in available if voice_id not in used), None)
-        if fallback:
-            character.voice_id = fallback
-            used.add(fallback)
-            continue
+        if gender in {"male", "female"}:
+            gender_fallback = next((voice_id for voice_id in available if _VOICE_ID_TO_GENDER.get(voice_id, "") == gender), None)
+            if gender_fallback:
+                character.voice_id = gender_fallback
+                continue
 
-        character.voice_id = current if current in available else narrator_voice
+        character.voice_id = narrator_voice
 
     return characters
 
@@ -911,11 +916,28 @@ def _extract_quote_blocks(text: str) -> list[tuple[str, int, int]]:
     return blocks
 
 
-def _pick_dialogue_voice(characters: list[CharacterSuggestion], dialog_index: int, narrator_voice: str) -> str:
-    available = [item for item in characters if (item.voice_id or "").strip() and item.voice_id != narrator_voice]
-    if not available:
-        return narrator_voice
-    return available[dialog_index % len(available)].voice_id
+def _pick_dialogue_voice(
+    characters: list[CharacterSuggestion],
+    narrator_voice: str,
+    preferred_character: CharacterSuggestion | None = None,
+) -> str:
+    if preferred_character is not None:
+        preferred_voice = (preferred_character.voice_id or "").strip()
+        if preferred_voice and preferred_voice != narrator_voice:
+            return preferred_voice
+
+    pivot = _pick_story_self_character(characters)
+    if pivot is not None:
+        pivot_voice = (pivot.voice_id or "").strip()
+        if pivot_voice and pivot_voice != narrator_voice:
+            return pivot_voice
+
+    for item in characters:
+        current_voice = (item.voice_id or "").strip()
+        if current_voice and current_voice != narrator_voice:
+            return current_voice
+
+    return narrator_voice
 
 
 def _merge_tts_pieces(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -942,6 +964,8 @@ def _build_tts_pieces(
     if not clean:
         return []
 
+    default_dialogue_character = _pick_story_self_character(characters)
+
     if sentence_plan:
         sentence_units = split_sentences(clean)
         if sentence_units:
@@ -960,7 +984,6 @@ def _build_tts_pieces(
                 plan_by_index[sentence_index] = item
 
             planned_pieces: list[tuple[str, str]] = []
-            dialogue_index = 0
             for sentence_index, sentence_text in enumerate(sentence_units):
                 plan_item = plan_by_index.get(sentence_index)
                 if not plan_item:
@@ -978,8 +1001,11 @@ def _build_tts_pieces(
                     if character_index is not None and 0 <= character_index < len(characters):
                         voice = (characters[character_index].voice_id or "").strip() or narrator_voice
                     else:
-                        voice = _pick_dialogue_voice(characters, dialog_index, narrator_voice)
-                    dialogue_index += 1
+                        voice = _pick_dialogue_voice(
+                            characters,
+                            narrator_voice,
+                            preferred_character=default_dialogue_character,
+                        )
                     planned_pieces.append((sentence_text, voice))
                 else:
                     planned_pieces.append((sentence_text, narrator_voice))
@@ -994,7 +1020,6 @@ def _build_tts_pieces(
 
     pieces: list[tuple[str, str]] = []
     cursor = 0
-    dialog_index = 0
     for quoted, quote_start, quote_end in quotes:
         if quote_start < cursor:
             continue
@@ -1005,8 +1030,16 @@ def _build_tts_pieces(
         if narration:
             pieces.append((narration, narrator_voice))
 
-        pieces.append((quoted, _pick_dialogue_voice(characters, dialog_index, narrator_voice)))
-        dialog_index += 1
+        pieces.append(
+            (
+                quoted,
+                _pick_dialogue_voice(
+                    characters,
+                    narrator_voice,
+                    preferred_character=default_dialogue_character,
+                ),
+            )
+        )
         cursor = quote_end + 1
 
     tail = clean[cursor:].strip()

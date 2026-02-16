@@ -27,6 +27,7 @@ SEGMENT_IMAGE_BUNDLE_RULES = (
     "When character_candidates are provided, return primary_index and related_indexes using those candidate indexes.",
     "For TTS assignment, use tts_sentence_units and return sentence_speakers by sentence_index only; never rewrite or copy sentence text.",
     "speaker_type must be narrator or character; when speaker_type=character, character_index must be a valid character_candidates index.",
+    "Do not choose or invent voice IDs in sentence_speakers; voice is determined strictly by character_candidates[index].voice_id.",
     "When sentence lacks explicit speaker name, infer from adjacent context and speaking verbs, but still output index mapping only.",
     "Return is_scene_only=true when this frame should be pure environment/scene without visible character.",
     "If story_world_context is provided, keep era/architecture/costume/props/culture consistent with that world setting.",
@@ -167,13 +168,16 @@ def build_character_analysis_prompt(
         "Character setting must be consistent with the story world context: era, region/culture, social identity, clothing, props and tone. "
         "Unless the text explicitly says otherwise, avoid cross-world mismatch (e.g. ancient Chinese setting with modern/western/Japanese role styling). "
         "Also determine character identity flags: is_main_character and is_story_self. "
+        "Also infer character gender as one of: male, female, unknown. "
         "is_story_self means this character corresponds to first-person narrator 'I/我' in the novel perspective. "
         "At most one character can be is_main_character=true, and at most one can be is_story_self=true. "
+        "When selecting voice_id, prefer voice gender aligned with character gender unless story text explicitly requires otherwise. "
         "voice_id must be selected strictly from the allowed voice IDs below. "
         "Do not invent any new voice name or ID. "
         "If unsure, choose the closest one from the list. "
         "JSON schema: "
         "{\"characters\":[{\"name\":\"\",\"role\":\"\",\"importance\":1,"
+        "\"gender\":\"unknown\","
         "\"is_main_character\":false,\"is_story_self\":false,"
         "\"appearance\":\"\",\"personality\":\"\",\"voice_id\":\"\",\"base_prompt\":\"\"}],"
         "\"confidence\":0.0}"

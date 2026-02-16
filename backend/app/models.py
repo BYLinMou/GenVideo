@@ -25,6 +25,7 @@ class VoiceInfo(BaseModel):
 class CharacterSuggestion(BaseModel):
     name: str
     role: str = "supporting"
+    gender: str = "unknown"
     importance: int = 5
     is_main_character: bool = False
     is_story_self: bool = False
