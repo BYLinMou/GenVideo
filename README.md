@@ -100,7 +100,7 @@ Default: `http://localhost:8000`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
 - `POST /api/jobs/{job_id}/resume` (continue cancelled/failed/interrupted job from checkpoint)
-- `DELETE /api/jobs/{job_id}` (hard delete job record + payload + cancel flag + `outputs/temp/{job_id}` + `outputs/{job_id}.mp4` if exists)
+- `DELETE /api/jobs/{job_id}` (hard delete job record + payload + cancel flag + `outputs/temp/{job_id}`; keeps final video file if it exists)
 - `GET /api/jobs?limit=100` (list recent jobs from SQLite, used by frontend recovery/sync)
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`

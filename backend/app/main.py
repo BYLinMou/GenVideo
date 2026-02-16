@@ -293,12 +293,10 @@ def _safe_unlink(path: Path) -> bool:
 
 def _delete_job_artifacts(job_id: str) -> dict[str, bool]:
     temp_job_dir = project_path(settings.temp_dir) / str(job_id or "")
-    final_video_path = project_path(settings.output_dir) / f"{job_id}.mp4"
-    final_thumb_path = _final_video_thumb_path(f"{job_id}.mp4")
     return {
         "temp_removed": _safe_unlink(temp_job_dir),
-        "video_removed": _safe_unlink(final_video_path),
-        "final_thumb_removed": _safe_unlink(final_thumb_path),
+        "video_removed": False,
+        "final_thumb_removed": False,
     }
 
 

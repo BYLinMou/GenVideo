@@ -340,7 +340,7 @@ Object.assign(zhCN.action, {
 Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
   confirmDelete: '确认删除',
   cancelDelete: '取消',
-  deleteJobMessage: '确认删除任务 {id} 吗？这会同时删除该任务的数据库记录、临时目录和成片文件（如果存在）。',
+  deleteJobMessage: '确认删除任务 {id} 吗？这会删除该任务的数据库记录和临时中间文件，不会删除已生成的成片。',
   deleteFinalVideoMessage: '确认删除成片 {filename} 吗？删除后会保留任务并回退为待合成状态（如果该任务仍存在）。'
 })
 
