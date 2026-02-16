@@ -2148,19 +2148,29 @@ async function removeJob(jobId) {
   const id = String(jobId || '')
   if (!id) return
 
-  const target = jobs.value.find((item) => item.id === id)
-  const needCancel = target ? ['queued', 'running'].includes(target.status) : false
-
-  if (needCancel) {
-    try {
-      await api.cancelJob(id)
-    } catch (error) {
-      const statusCode = Number(error?.status || error?.statusCode || 0)
-      const message = String(error?.message || '')
-      if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('job not found')) {
-        ElMessage.error(t('toast.cancelFailed', { error: error.message }))
-        return
+  try {
+    await ElMessageBox.confirm(
+      t('dialog.deleteJobMessage', { id }),
+      t('dialog.tipTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('dialog.confirmDelete'),
+        cancelButtonText: t('dialog.cancelDelete'),
+        distinguishCancelAndClose: true,
       }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await api.deleteJob(id)
+  } catch (error) {
+    const statusCode = Number(error?.status || error?.statusCode || 0)
+    const message = String(error?.message || '')
+    if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('not found')) {
+      ElMessage.error(t('toast.jobDeleteFailed', { error: error.message }))
+      return
     }
   }
 
@@ -2169,9 +2179,46 @@ async function removeJob(jobId) {
   if (!jobs.value.length) {
     stopPolling()
   }
+  ElMessage.success(t('toast.jobDeleteSuccess', { id }))
+}
 
-  if (needCancel) {
-    ElMessage.success(t('toast.cancelSuccess'))
+async function deleteFinalVideo(item) {
+  const filename = String(item?.filename || '').trim()
+  if (!filename) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('dialog.deleteFinalVideoMessage', { filename }),
+      t('dialog.tipTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('dialog.confirmDelete'),
+        cancelButtonText: t('dialog.cancelDelete'),
+        distinguishCancelAndClose: true,
+      }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await api.deleteFinalVideo(filename)
+    finalVideos.value = finalVideos.value.filter((video) => String(video.filename || '') !== filename)
+    resetFinalVideoEnabled()
+
+    const matched = filename.match(/^(.*)\.mp4$/i)
+    const jobId = matched ? String(matched[1] || '').trim() : ''
+    if (jobId) {
+      removeJobRecord(jobId)
+      persistJobSnapshot()
+      if (!jobs.value.length) {
+        stopPolling()
+      }
+    }
+
+    ElMessage.success(t('toast.finalVideoDeleteSuccess', { filename }))
+  } catch (error) {
+    ElMessage.error(t('toast.finalVideoDeleteFailed', { error: error.message }))
   }
 }
 
@@ -2762,7 +2809,7 @@ onUnmounted(() => {
               <span>· {{ t('hint.jobCreatedAt', { time: formatDateTime(item.createdAt) }) }}</span>
             </div>
           </div>
-          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
+          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.deleteJob') }}</el-button>
         </div>
       </div>
 
@@ -2888,6 +2935,7 @@ onUnmounted(() => {
             <div class="actions">
               <el-button text @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
               <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+              <el-button text type="danger" @click="deleteFinalVideo(item)">{{ t('action.deleteFinalVideo') }}</el-button>
             </div>
           </article>
         </div>

@@ -287,5 +287,15 @@ class JobStore:
                 conn.execute("DELETE FROM job_cancel_flags WHERE job_id = ?", (job_id,))
                 conn.commit()
 
+    def delete_job(self, job_id: str) -> bool:
+        with self.lock:
+            with self._connect() as conn:
+                exists = conn.execute("SELECT 1 FROM jobs WHERE job_id = ?", (job_id,)).fetchone()
+                conn.execute("DELETE FROM jobs WHERE job_id = ?", (job_id,))
+                conn.execute("DELETE FROM job_payloads WHERE job_id = ?", (job_id,))
+                conn.execute("DELETE FROM job_cancel_flags WHERE job_id = ?", (job_id,))
+                conn.commit()
+                return bool(exists)
+
 
 job_store = JobStore()

@@ -332,4 +332,23 @@ Object.assign(zhCN.toast, {
   manualReplaceApplied: '已替换 {count} 处内容'
 })
 
+Object.assign(zhCN.action, {
+  deleteJob: '删除',
+  deleteFinalVideo: '删除成片'
+})
+
+Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
+  confirmDelete: '确认删除',
+  cancelDelete: '取消',
+  deleteJobMessage: '确认删除任务 {id} 吗？这会同时删除该任务的数据库记录、临时目录和成片文件（如果存在）。',
+  deleteFinalVideoMessage: '确认删除成片 {filename} 吗？这会同步清理对应任务缓存（如存在）。'
+})
+
+Object.assign(zhCN.toast, {
+  jobDeleteSuccess: '任务 {id} 已删除',
+  jobDeleteFailed: '删除任务失败：{error}',
+  finalVideoDeleteSuccess: '成片 {filename} 已删除',
+  finalVideoDeleteFailed: '删除成片失败：{error}'
+})
+
 export default zhCN

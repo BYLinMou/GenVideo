@@ -100,6 +100,7 @@ Default: `http://localhost:8000`
 - `POST /api/jobs/{job_id}/remix-bgm` (replace BGM only, no full regeneration)
 - `POST /api/jobs/{job_id}/cancel`
 - `POST /api/jobs/{job_id}/resume` (continue cancelled/failed/interrupted job from checkpoint)
+- `DELETE /api/jobs/{job_id}` (hard delete job record + payload + cancel flag + `outputs/temp/{job_id}` + `outputs/{job_id}.mp4` if exists)
 - `GET /api/jobs?limit=100` (list recent jobs from SQLite, used by frontend recovery/sync)
 - `GET /api/jobs/{job_id}`
 - `GET /api/jobs/{job_id}/clips/{clip_index}`
@@ -108,6 +109,7 @@ Default: `http://localhost:8000`
 - `GET /api/final-videos?limit=200` (list final videos sorted by creation time desc)
 - `GET /api/final-videos/{filename}/thumb` (on-demand cached final-video thumbnail)
 - `GET /api/final-videos/{filename}/download`
+- `DELETE /api/workspace/final-videos/{filename}` (workspace-protected delete; removes final video + final-video thumb + `outputs/temp/{job_id}` + related job DB records if stem matches)
 
 Character identity fields (`CharacterSuggestion`):
 

@@ -178,6 +178,9 @@ export const api = {
   resumeJob(jobId) {
     return jsonRequest(`/api/jobs/${jobId}/resume`, 'POST')
   },
+  deleteJob(jobId) {
+    return request(`/api/jobs/${jobId}`, { method: 'DELETE' })
+  },
   listJobs(limit = 100) {
     const safeLimit = Math.max(1, Math.min(Number(limit || 100), 500))
     return request(`/api/jobs?limit=${safeLimit}&_ts=${Date.now()}`, { cache: 'no-store' })
@@ -197,6 +200,9 @@ export const api = {
   listFinalVideos(limit = 200) {
     const safeLimit = Math.max(1, Math.min(Number(limit || 200), 2000))
     return request(`/api/final-videos?limit=${safeLimit}&_ts=${Date.now()}`, { cache: 'no-store' })
+  },
+  deleteFinalVideo(filename) {
+    return request(`/api/workspace/final-videos/${encodeURIComponent(filename)}`, { method: 'DELETE' })
   },
   listCharacterRefImages() {
     return request('/api/character-reference-images')

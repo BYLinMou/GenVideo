@@ -253,12 +253,17 @@ def _job_clip_thumb_path(job_id: str, clip_index: int) -> Path:
     return project_path(settings.temp_dir) / job_id / "thumbs" / f"clip_{clip_index:04d}.jpg"
 
 
-def _resolve_final_video_path(filename: str) -> Path:
+def _normalize_final_video_filename(filename: str) -> str:
     safe_name = Path(filename or "").name
     if not safe_name or safe_name != str(filename or ""):
         raise HTTPException(status_code=400, detail="invalid filename")
     if Path(safe_name).suffix.lower() != ".mp4":
         raise HTTPException(status_code=400, detail="only mp4 files are supported")
+    return safe_name
+
+
+def _resolve_final_video_path(filename: str) -> Path:
+    safe_name = _normalize_final_video_filename(filename)
 
     target = project_path(settings.output_dir) / safe_name
     if not target.exists() or not target.is_file():
@@ -270,6 +275,31 @@ def _final_video_thumb_path(filename: str) -> Path:
     safe_name = Path(filename or "").name
     stem = Path(safe_name).stem
     return project_path(settings.temp_dir) / "final_video_thumbs" / f"{stem}.jpg"
+
+
+def _safe_unlink(path: Path) -> bool:
+    try:
+        if not path.exists():
+            return False
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+        return True
+    except Exception:
+        logger.exception("Failed to delete path: %s", path)
+        return False
+
+
+def _delete_job_artifacts(job_id: str) -> dict[str, bool]:
+    temp_job_dir = project_path(settings.temp_dir) / str(job_id or "")
+    final_video_path = project_path(settings.output_dir) / f"{job_id}.mp4"
+    final_thumb_path = _final_video_thumb_path(f"{job_id}.mp4")
+    return {
+        "temp_removed": _safe_unlink(temp_job_dir),
+        "video_removed": _safe_unlink(final_video_path),
+        "final_thumb_removed": _safe_unlink(final_thumb_path),
+    }
 
 
 def _ensure_final_video_thumbnail(filename: str) -> Path:
@@ -703,6 +733,29 @@ async def resume_video_job(request: Request, job_id: str) -> dict:
     return {"status": code, "job_id": job_id}
 
 
+@app.delete("/api/jobs/{job_id}")
+async def delete_job(job_id: str) -> dict:
+    status = _resolve_job_status(job_id)
+    if status and status.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="cannot delete an active job")
+
+    file_removed = await run_in_threadpool(_delete_job_artifacts, job_id)
+    job_removed = job_store.delete_job(job_id)
+
+    removed_any = bool(job_removed or any(file_removed.values()))
+    if not removed_any:
+        raise HTTPException(status_code=404, detail="job not found")
+
+    return {
+        "job_id": job_id,
+        "deleted": True,
+        "job_removed": bool(job_removed),
+        "temp_removed": bool(file_removed.get("temp_removed")),
+        "video_removed": bool(file_removed.get("video_removed")),
+        "final_thumb_removed": bool(file_removed.get("final_thumb_removed")),
+    }
+
+
 @app.get("/api/jobs")
 async def list_jobs(limit: int = 100) -> dict:
     statuses = job_store.list_recent(limit=limit)
@@ -805,3 +858,32 @@ async def get_final_video_thumbnail(filename: str):
 async def download_final_video(filename: str):
     path = _resolve_final_video_path(filename)
     return FileResponse(path, media_type="video/mp4", filename=path.name)
+
+
+@app.delete("/api/workspace/final-videos/{filename}")
+async def delete_final_video(filename: str) -> dict:
+    safe_name = _normalize_final_video_filename(filename)
+    final_video_path = project_path(settings.output_dir) / safe_name
+    job_id = Path(safe_name).stem
+
+    status = job_store.get(job_id)
+    if status and status.status in {"queued", "running"}:
+        raise HTTPException(status_code=409, detail="cannot delete final video for an active job")
+
+    removed_flags = {
+        "video_removed": _safe_unlink(final_video_path),
+        "final_thumb_removed": _safe_unlink(_final_video_thumb_path(safe_name)),
+        "temp_removed": _safe_unlink(project_path(settings.temp_dir) / job_id),
+    }
+    job_removed = job_store.delete_job(job_id)
+
+    if not any(removed_flags.values()) and not job_removed:
+        raise HTTPException(status_code=404, detail="final video not found")
+
+    return {
+        "filename": safe_name,
+        "job_id": job_id,
+        "deleted": True,
+        "job_removed": bool(job_removed),
+        **removed_flags,
+    }
