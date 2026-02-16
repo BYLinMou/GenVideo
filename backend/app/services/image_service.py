@@ -54,7 +54,7 @@ def _build_messages(
         dedup_paths.append(raw)
 
     image_parts: list[dict] = []
-    for raw in dedup_paths[:2]:
+    for raw in dedup_paths[:4]:
         ref = Path(raw)
         if ref.exists() and ref.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
             mime = "image/png" if ref.suffix.lower() == ".png" else "image/jpeg"

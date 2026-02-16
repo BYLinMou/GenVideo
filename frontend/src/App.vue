@@ -182,6 +182,18 @@ const imageSourceSummary = computed(() => {
   }
 })
 
+const imageSourceLiveBadges = computed(() => {
+  const report = imageSourceSummary.value
+  if (!report) return []
+  const items = [
+    { key: 'cache', label: t('hint.imageSourceBadgeCache'), count: report.cache_images, ratio: report.cacheRatioText },
+    { key: 'generated', label: t('hint.imageSourceBadgeGenerated'), count: report.generated_images, ratio: report.generatedRatioText },
+    { key: 'reference', label: t('hint.imageSourceBadgeReference'), count: report.reference_images, ratio: formatRatioPercent(report.reference_ratio) },
+    { key: 'other', label: t('hint.imageSourceBadgeOther'), count: report.other_images, ratio: report.otherRatioText },
+  ]
+  return items.filter((item) => item.count > 0)
+})
+
 const bgmStatus = reactive({
   exists: false,
   filename: 'bgm.mp3',
@@ -234,6 +246,7 @@ const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
+const sourceTextInputRef = ref(null)
 const clipVideoEnabled = reactive({})
 const finalVideoEnabled = reactive({})
 const JOB_LIST_PAGE_SIZE = 5
@@ -378,9 +391,20 @@ const filteredModels = computed(() => {
   })
 })
 
+const filteredRefImages = computed(() => {
+  const keyword = String(refPicker.keyword || '').trim().toLowerCase()
+  if (!keyword) return refImages.value
+  return refImages.value.filter((item) => {
+    const filename = String(item?.filename || '').toLowerCase()
+    const path = String(item?.path || '').toLowerCase()
+    return filename.includes(keyword) || path.includes(keyword)
+  })
+})
+
 const refPicker = reactive({
   visible: false,
-  characterIndex: -1
+  characterIndex: -1,
+  keyword: ''
 })
 
 const bgmPicker = reactive({
@@ -412,9 +436,12 @@ function isGeneratingRef(character, index) {
 function normalizeDraftCharacter(item) {
   if (!item || typeof item !== 'object') return null
   const importance = Number(item.importance || 5)
+  const rawGender = String(item.gender || '').trim().toLowerCase()
+  const gender = rawGender === 'male' || rawGender === 'female' ? rawGender : 'unknown'
   return {
     name: String(item.name || '').trim(),
     role: String(item.role || 'supporting').trim() || 'supporting',
+    gender,
     importance: Math.max(1, Math.min(10, Number.isFinite(importance) ? importance : 5)),
     is_main_character: Boolean(item.is_main_character),
     is_story_self: Boolean(item.is_story_self),
@@ -444,6 +471,11 @@ function buildWorkspaceDraftPayload() {
     confidence: Number(confidence.value || 0),
     form: formSnapshot,
     characters: (characters.value || []).map((item) => normalizeDraftCharacter(item)).filter(Boolean),
+    manualReplace: {
+      find: String(manualReplace.find || ''),
+      replace: String(manualReplace.replace || ''),
+      caseSensitive: Boolean(manualReplace.caseSensitive)
+    },
     nameReplace: {
       enabled: Boolean(nameReplace.enabled),
       maxCandidates: Math.max(1, Number(nameReplace.maxCandidates || 24))
@@ -524,6 +556,11 @@ function restoreWorkspaceDraft() {
     const savedConfidence = Number(parsed.confidence)
     confidence.value = Number.isFinite(savedConfidence) ? savedConfidence : 0
 
+    const savedManualReplace = parsed.manualReplace && typeof parsed.manualReplace === 'object' ? parsed.manualReplace : {}
+    manualReplace.find = String(savedManualReplace.find || '')
+    manualReplace.replace = String(savedManualReplace.replace || '')
+    manualReplace.caseSensitive = Boolean(savedManualReplace.caseSensitive)
+
     const savedNameReplace = parsed.nameReplace && typeof parsed.nameReplace === 'object' ? parsed.nameReplace : {}
     nameReplace.enabled = Boolean(savedNameReplace.enabled)
     const maxCandidates = Number(savedNameReplace.maxCandidates)
@@ -557,6 +594,19 @@ const nameReplace = reactive({
 const replacementEntries = ref([])
 const novelAliases = ref([])
 const customAliasInput = ref('')
+
+const manualReplace = reactive({
+  find: '',
+  replace: '',
+  caseSensitive: false
+})
+
+const manualFindState = reactive({
+  lookupKey: '',
+  cursor: 0,
+  current: 0,
+  total: 0
+})
 
 const replacementEnabledCount = computed(() => {
   return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
@@ -607,6 +657,16 @@ function aspectRatioIconStyle(value) {
 
 function formatModelLabel(item) {
   return `${item.name} (${item.provider})${item.available ? '' : ` [${t('option.unavailable')}]`}`
+}
+
+function formatVoiceLabel(voice) {
+  const rawGender = String(voice?.gender || '').trim().toLowerCase()
+  const gender = rawGender === 'male' || rawGender === 'female' ? rawGender : 'unknown'
+  const genderLabel = gender === 'male' ? t('option.genderMale') : gender === 'female' ? t('option.genderFemale') : t('option.genderUnknown')
+  const description = String(voice?.description || '').trim()
+  return description
+    ? `${voice.name} (${voice.id}) · ${genderLabel} · ${description}`
+    : `${voice.name} (${voice.id}) · ${genderLabel}`
 }
 
 function handleModelFilter(query) {
@@ -831,6 +891,106 @@ function applyReplacementsToSourceText() {
   ElMessage.success(t('toast.replacementApplied'))
 }
 
+function applyManualReplaceAll() {
+  const source = String(form.text || '')
+  if (!source.trim()) {
+    ElMessage.warning(t('toast.textRequired'))
+    return
+  }
+
+  const findText = String(manualReplace.find || '')
+  if (!findText.trim()) {
+    ElMessage.warning(t('toast.manualReplaceFindRequired'))
+    return
+  }
+
+  const replaceText = String(manualReplace.replace || '')
+  const flags = manualReplace.caseSensitive ? 'g' : 'gi'
+  const pattern = new RegExp(escapeRegExp(findText), flags)
+  let replacedCount = 0
+  const transformed = source.replace(pattern, () => {
+    replacedCount += 1
+    return replaceText
+  })
+
+  if (!replacedCount) {
+    ElMessage.info(t('toast.manualReplaceNoMatch'))
+    return
+  }
+
+  form.text = transformed
+  manualFindState.lookupKey = ''
+  manualFindState.cursor = 0
+  manualFindState.current = 0
+  manualFindState.total = 0
+  ElMessage.success(t('toast.manualReplaceApplied', { count: replacedCount }))
+}
+
+function collectManualFindMatches(source, keyword, caseSensitive) {
+  const content = String(source || '')
+  const needle = String(keyword || '')
+  if (!content || !needle) return []
+
+  const target = caseSensitive ? content : content.toLocaleLowerCase()
+  const lookup = caseSensitive ? needle : needle.toLocaleLowerCase()
+  const indexes = []
+  let cursor = 0
+  const step = Math.max(1, lookup.length)
+
+  while (cursor < target.length) {
+    const index = target.indexOf(lookup, cursor)
+    if (index < 0) break
+    indexes.push(index)
+    cursor = index + step
+  }
+  return indexes
+}
+
+async function findNextInSourceText() {
+  const source = String(form.text || '')
+  if (!source.trim()) {
+    ElMessage.warning(t('toast.textRequired'))
+    return
+  }
+
+  const keyword = String(manualReplace.find || '')
+  if (!keyword.trim()) {
+    ElMessage.warning(t('toast.manualReplaceFindRequired'))
+    return
+  }
+
+  const lookupKey = `${manualReplace.caseSensitive ? '1' : '0'}:${keyword}`
+  if (manualFindState.lookupKey !== lookupKey) {
+    manualFindState.lookupKey = lookupKey
+    manualFindState.cursor = 0
+    manualFindState.current = 0
+    manualFindState.total = 0
+  }
+
+  const matches = collectManualFindMatches(source, keyword, manualReplace.caseSensitive)
+  if (!matches.length) {
+    manualFindState.current = 0
+    manualFindState.total = 0
+    ElMessage.info(t('toast.manualFindNoMatch'))
+    return
+  }
+
+  const nextIndex = matches.find((item) => item >= manualFindState.cursor)
+  const targetIndex = typeof nextIndex === 'number' ? nextIndex : matches[0]
+  const current = matches.indexOf(targetIndex) + 1
+  manualFindState.cursor = targetIndex + keyword.length
+  manualFindState.current = current
+  manualFindState.total = matches.length
+
+  await nextTick()
+  const textInput = sourceTextInputRef.value
+  const textarea = textInput?.textarea || textInput?.input || null
+  if (textarea?.focus && textarea?.setSelectionRange) {
+    textarea.focus()
+    textarea.setSelectionRange(targetIndex, targetIndex + keyword.length)
+  }
+}
+
 function resetJob() {
   job.id = ''
   job.status = ''
@@ -871,6 +1031,17 @@ function normalizeImageSourceReport(raw) {
   }
   const total = toInt(raw.total_images)
   if (!total) return null
+
+  const sourceCounts = raw.source_counts && typeof raw.source_counts === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.source_counts).map(([key, value]) => [String(key), toInt(value)])
+      )
+    : {}
+
+  const clipSources = Array.isArray(raw.clip_sources)
+    ? raw.clip_sources.map((item) => String(item || ''))
+    : []
+
   return {
     total_images: total,
     cache_images: toInt(raw.cache_images),
@@ -880,8 +1051,65 @@ function normalizeImageSourceReport(raw) {
     cache_ratio: toRatio(raw.cache_ratio),
     generate_ratio: toRatio(raw.generate_ratio),
     reference_ratio: toRatio(raw.reference_ratio),
-    other_ratio: toRatio(raw.other_ratio)
+    other_ratio: toRatio(raw.other_ratio),
+    source_counts: sourceCounts,
+    clip_sources: clipSources,
   }
+}
+
+function normalizeClipSourceKey(source) {
+  const raw = String(source || '').trim().toLowerCase()
+  if (!raw) return ''
+  const normalized = raw.replaceAll('-', '_')
+  const known = new Set([
+    'cache',
+    'generated',
+    'fallback_llm',
+    'fallback_cache',
+    'fallback_character_cache',
+    'fallback_scene_only_cache',
+    'fallback_reference',
+    'fallback_random_cache',
+    'other',
+  ])
+  return known.has(normalized) ? normalized : 'other'
+}
+
+function clipSourceLabel(source) {
+  const key = normalizeClipSourceKey(source)
+  if (!key) return ''
+  const labels = {
+    cache: t('hint.imageSourceTagCache'),
+    generated: t('hint.imageSourceTagGenerated'),
+    fallback_llm: t('hint.imageSourceTagFallbackLlm'),
+    fallback_cache: t('hint.imageSourceTagFallbackCache'),
+    fallback_character_cache: t('hint.imageSourceTagFallbackCharacterCache'),
+    fallback_scene_only_cache: t('hint.imageSourceTagFallbackSceneOnlyCache'),
+    fallback_reference: t('hint.imageSourceTagFallbackReference'),
+    fallback_random_cache: t('hint.imageSourceTagFallbackRandomCache'),
+    other: t('hint.imageSourceTagOther'),
+  }
+  return labels[key] || t('hint.imageSourceTagOther')
+}
+
+const clipSourceMetaList = computed(() => {
+  const report = normalizeImageSourceReport(job.imageSourceReport)
+  const clipSources = Array.isArray(report?.clip_sources) ? report.clip_sources : []
+  return clipSources.map((source) => {
+    const key = normalizeClipSourceKey(source)
+    if (!key) return null
+    return {
+      key,
+      label: clipSourceLabel(key),
+      className: `source-${key}`,
+    }
+  })
+})
+
+function getClipSourceMeta(index) {
+  const idx = Number(index)
+  if (!Number.isFinite(idx) || idx < 0) return null
+  return clipSourceMetaList.value[idx] || null
 }
 
 function formatRatioPercent(value) {
@@ -1256,6 +1484,13 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
   if (!id || !status) return null
   const createdAtMs = parseApiTimeToMs(status.created_at)
   const updatedAtMs = parseApiTimeToMs(status.updated_at)
+  const imageSourceReportPayload = {
+    ...(status.image_source_report && typeof status.image_source_report === 'object' ? status.image_source_report : {}),
+  }
+  if (Array.isArray(status.clip_image_sources)) {
+    imageSourceReportPayload.clip_sources = status.clip_image_sources.map((item) => String(item || ''))
+  }
+
   const next = {
     id,
     status: status.status || '',
@@ -1265,7 +1500,7 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
     clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
-    imageSourceReport: normalizeImageSourceReport(status.image_source_report),
+    imageSourceReport: normalizeImageSourceReport(imageSourceReportPayload),
     videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
     updatedAt: updatedAtMs || Date.now(),
     createdAt: createdAtMs || undefined
@@ -1389,12 +1624,14 @@ function restoreJobSnapshot() {
 
 function openRefPicker(index) {
   refPicker.characterIndex = index
+  refPicker.keyword = ''
   refPicker.visible = true
 }
 
 function closeRefPicker() {
   refPicker.visible = false
   refPicker.characterIndex = -1
+  refPicker.keyword = ''
 }
 
 function openBgmPicker() {
@@ -1514,6 +1751,7 @@ async function runAnalyze() {
     })
     const normalizedCharacters = (data.characters || []).map((item) => ({
       ...item,
+      gender: String(item?.gender || 'unknown').trim().toLowerCase() === 'male' ? 'male' : String(item?.gender || 'unknown').trim().toLowerCase() === 'female' ? 'female' : 'unknown',
       is_main_character: Boolean(item?.is_main_character),
       is_story_self: Boolean(item?.is_story_self),
       reference_image_path: item.reference_image_path || '',
@@ -2024,19 +2262,29 @@ async function removeJob(jobId) {
   const id = String(jobId || '')
   if (!id) return
 
-  const target = jobs.value.find((item) => item.id === id)
-  const needCancel = target ? ['queued', 'running'].includes(target.status) : false
-
-  if (needCancel) {
-    try {
-      await api.cancelJob(id)
-    } catch (error) {
-      const statusCode = Number(error?.status || error?.statusCode || 0)
-      const message = String(error?.message || '')
-      if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('job not found')) {
-        ElMessage.error(t('toast.cancelFailed', { error: error.message }))
-        return
+  try {
+    await ElMessageBox.confirm(
+      t('dialog.deleteJobMessage', { id }),
+      t('dialog.tipTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('dialog.confirmDelete'),
+        cancelButtonText: t('dialog.cancelDelete'),
+        distinguishCancelAndClose: true,
       }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    await api.deleteJob(id)
+  } catch (error) {
+    const statusCode = Number(error?.status || error?.statusCode || 0)
+    const message = String(error?.message || '')
+    if (statusCode !== 404 && !message.includes('404') && !message.toLowerCase().includes('not found')) {
+      ElMessage.error(t('toast.jobDeleteFailed', { error: error.message }))
+      return
     }
   }
 
@@ -2045,9 +2293,48 @@ async function removeJob(jobId) {
   if (!jobs.value.length) {
     stopPolling()
   }
+  ElMessage.success(t('toast.jobDeleteSuccess', { id }))
+}
 
-  if (needCancel) {
-    ElMessage.success(t('toast.cancelSuccess'))
+async function deleteFinalVideo(item) {
+  const filename = String(item?.filename || '').trim()
+  if (!filename) return
+
+  try {
+    await ElMessageBox.confirm(
+      t('dialog.deleteFinalVideoMessage', { filename }),
+      t('dialog.tipTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('dialog.confirmDelete'),
+        cancelButtonText: t('dialog.cancelDelete'),
+        distinguishCancelAndClose: true,
+      }
+    )
+  } catch {
+    return
+  }
+
+  try {
+    const result = await api.deleteFinalVideo(filename)
+    finalVideos.value = finalVideos.value.filter((video) => String(video.filename || '') !== filename)
+    resetFinalVideoEnabled()
+
+    const rolledBackStatus = result?.rolled_back_status && typeof result.rolled_back_status === 'object'
+      ? result.rolled_back_status
+      : null
+    const jobId = String(result?.job_id || '').trim()
+    if (jobId && rolledBackStatus) {
+      syncActiveJobRecordFromApiStatus(jobId, rolledBackStatus)
+      startPolling()
+    } else if (jobId) {
+      await forceRefreshJobStatus(jobId, { silent: true })
+    }
+
+    persistJobSnapshot()
+    ElMessage.success(t('toast.finalVideoDeleteSuccess', { filename }))
+  } catch (error) {
+    ElMessage.error(t('toast.finalVideoDeleteFailed', { error: error.message }))
   }
 }
 
@@ -2112,6 +2399,18 @@ watch(
 watch(
   replacementEntries,
   () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(
+  manualReplace,
+  () => {
+    manualFindState.lookupKey = ''
+    manualFindState.cursor = 0
+    manualFindState.current = 0
+    manualFindState.total = 0
     schedulePersistWorkspaceDraft()
   },
   { deep: true }
@@ -2441,7 +2740,30 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
+      <div class="manual-replace-toolbar">
+        <el-input
+          v-model="manualReplace.find"
+          :placeholder="t('placeholder.manualFind')"
+          clearable
+          @keyup.enter="findNextInSourceText"
+        />
+        <el-input
+          v-model="manualReplace.replace"
+          :placeholder="t('placeholder.manualReplace')"
+          clearable
+        />
+        <div class="manual-replace-switch">
+          <el-switch v-model="manualReplace.caseSensitive" />
+          <span>{{ t('field.manualReplaceCaseSensitive') }}</span>
+        </div>
+        <el-button @click="findNextInSourceText">{{ t('action.manualFindNext') }}</el-button>
+        <el-button type="primary" @click="applyManualReplaceAll">{{ t('action.manualReplaceAll') }}</el-button>
+        <span v-if="manualFindState.total > 0" class="muted manual-find-summary">
+          {{ t('hint.manualFindSummary', { current: manualFindState.current, total: manualFindState.total }) }}
+        </span>
+      </div>
+
+      <el-input ref="sourceTextInputRef" v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
       <div class="actions">
         <el-button @click="removeChapterHeadings">{{ t('action.filterChapterHeadings') }}</el-button>
         <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
@@ -2500,6 +2822,15 @@ onUnmounted(() => {
           </div>
 
           <div>
+            <label>{{ t('field.gender') }}</label>
+            <el-select v-model="character.gender" style="width: 100%">
+              <el-option :label="t('option.genderUnknown')" value="unknown" />
+              <el-option :label="t('option.genderMale')" value="male" />
+              <el-option :label="t('option.genderFemale')" value="female" />
+            </el-select>
+          </div>
+
+          <div>
             <label>{{ t('field.mainCharacter') }}</label>
             <el-switch
               :model-value="!!character.is_main_character"
@@ -2518,7 +2849,7 @@ onUnmounted(() => {
           <div>
             <label>{{ t('field.voice') }}</label>
             <el-select v-model="character.voice_id" style="width: 100%">
-              <el-option v-for="voice in voices" :key="voice.id" :label="`${voice.name} (${voice.id})`" :value="voice.id" />
+              <el-option v-for="voice in voices" :key="voice.id" :label="formatVoiceLabel(voice)" :value="voice.id" />
             </el-select>
           </div>
 
@@ -2603,7 +2934,7 @@ onUnmounted(() => {
               <span>· {{ t('hint.jobCreatedAt', { time: formatDateTime(item.createdAt) }) }}</span>
             </div>
           </div>
-          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
+          <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.deleteJob') }}</el-button>
         </div>
       </div>
 
@@ -2634,11 +2965,41 @@ onUnmounted(() => {
         </el-progress>
         <p><strong>{{ t('hint.overallProgress') }}：</strong>{{ uiProgressPercent }}%</p>
         <el-progress :percentage="uiProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')" />
+        <div v-if="imageSourceSummary" class="image-source-live">
+          <p class="muted">
+            {{ t('hint.imageSourceReportSummary', {
+              cache: imageSourceSummary.cache_images,
+              generated: imageSourceSummary.generated_images,
+              total: imageSourceSummary.total_images,
+              cacheRatio: imageSourceSummary.cacheRatioText,
+              generatedRatio: imageSourceSummary.generatedRatioText
+            }) }}
+          </p>
+          <div class="image-source-badges">
+            <span
+              v-for="item in imageSourceLiveBadges"
+              :key="`img-source-badge-${item.key}`"
+              class="image-source-badge"
+              :class="`source-${item.key}`"
+            >
+              {{ item.label }} {{ item.count }}/{{ imageSourceSummary.total_images }} · {{ item.ratio }}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div v-if="job.clipPreviewUrls.length" class="clip-grid">
         <div v-for="(url, index) in job.clipPreviewUrls" :key="`${job.id}-${index}`" class="clip-item">
-          <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
+          <div class="clip-head">
+            <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
+            <span
+              v-if="getClipSourceMeta(index)"
+              class="clip-source-pill"
+              :class="getClipSourceMeta(index).className"
+            >
+              {{ getClipSourceMeta(index).label }}
+            </span>
+          </div>
           <div
             v-if="!isClipVideoEnabled(index)"
             class="clip-thumb-wrap"
@@ -2726,9 +3087,10 @@ onUnmounted(() => {
             <div class="final-video-name">{{ item.filename }}</div>
             <div class="muted">{{ t('hint.finalVideoCreatedAt', { time: formatDateTime(item.createdAt) }) }}</div>
             <div class="muted">{{ t('hint.finalVideoSize', { size: formatFileSize(item.size) }) }}</div>
-            <div class="actions">
-              <el-button text @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
-              <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+            <div class="actions final-video-actions">
+              <el-button class="final-video-action" @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
+              <a class="final-video-action final-video-link" :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+              <el-button class="final-video-action final-video-action-danger" @click="deleteFinalVideo(item)">{{ t('action.deleteFinalVideo') }}</el-button>
             </div>
           </article>
         </div>
@@ -2740,16 +3102,19 @@ onUnmounted(() => {
       v-model="refPicker.visible"
       :title="t('action.pickReference')"
       width="820px"
-      :close-on-click-modal="false"
+      :close-on-click-modal="true"
       @closed="closeRefPicker"
     >
-      <div class="ref-library-modal" v-if="refImages.length">
-        <div v-for="image in refImages" :key="image.path" class="ref-option" @click="pickRefImage(image)">
+      <div class="ref-picker-toolbar">
+        <el-input v-model="refPicker.keyword" clearable :placeholder="t('placeholder.referenceImageSearch')" />
+      </div>
+      <div class="ref-library-modal" v-if="filteredRefImages.length">
+        <div v-for="image in filteredRefImages" :key="image.path" class="ref-option" @click="pickRefImage(image)">
           <img :src="resolveRefImageUrl(image)" alt="ref" />
           <div class="filename">{{ image.filename }}</div>
         </div>
       </div>
-      <el-empty v-else :description="t('hint.noRefImage')" />
+      <el-empty v-else :description="refImages.length ? t('hint.noRefImageSearchResult') : t('hint.noRefImage')" />
       <template #footer>
         <el-button @click="closeRefPicker">{{ t('action.close') }}</el-button>
       </template>

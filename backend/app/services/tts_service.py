@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import wave
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from edge_tts import Communicate
 from mutagen import File as MutagenFile
 
 from ..config import settings
+
+
+logger = logging.getLogger(__name__)
 
 
 def _estimate_duration_by_text(text: str) -> float:
@@ -30,35 +34,63 @@ def _create_silent_wav(path: Path, duration_sec: float, sample_rate: int = 22050
 
 async def synthesize_tts(text: str, voice: str, output_path: Path) -> tuple[Path, float]:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    text_content = str(text or "").strip()
+    if not text_content:
+        fallback_path = output_path.with_suffix(".wav")
+        duration = 1.5
+        _create_silent_wav(fallback_path, duration)
+        logger.warning("TTS received empty text, generated silent wav: %s", fallback_path)
+        return fallback_path, duration
 
     if settings.tts_api_url:
         try:
             async with httpx.AsyncClient(timeout=90) as client:
                 response = await client.post(
                     settings.tts_api_url,
-                    json={"text": text, "voice": voice},
+                    json={"text": text_content, "voice": voice},
                 )
                 response.raise_for_status()
+                content_type = str(response.headers.get("content-type") or "").lower()
+                if not response.content:
+                    raise RuntimeError("remote TTS returned empty response body")
+                if "audio" not in content_type and "application/octet-stream" not in content_type:
+                    raise RuntimeError(f"remote TTS returned unexpected content-type: {content_type}")
                 output_path.write_bytes(response.content)
                 duration = get_audio_duration(output_path)
+                if output_path.exists() and output_path.stat().st_size > 0 and duration <= 0:
+                    duration = _estimate_duration_by_text(text_content)
                 if duration <= 0:
-                    duration = _estimate_duration_by_text(text)
+                    raise RuntimeError("remote TTS wrote invalid audio file")
                 return output_path, duration
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("Remote TTS failed, fallback to edge-tts: voice=%s error=%s", voice, exc)
 
-    try:
-        communicator = Communicate(text=text, voice=voice)
-        await asyncio.wait_for(communicator.save(str(output_path)), timeout=45)
-        duration = get_audio_duration(output_path)
-        if duration <= 0:
-            duration = _estimate_duration_by_text(text)
-        return output_path, duration
-    except Exception:
-        fallback_path = output_path.with_suffix(".wav")
-        duration = _estimate_duration_by_text(text)
-        _create_silent_wav(fallback_path, duration)
-        return fallback_path, duration
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            communicator = Communicate(text=text_content, voice=voice)
+            await asyncio.wait_for(communicator.save(str(output_path)), timeout=45)
+            if not output_path.exists() or output_path.stat().st_size <= 0:
+                raise RuntimeError("edge-tts wrote empty file")
+            duration = get_audio_duration(output_path)
+            if duration <= 0:
+                duration = _estimate_duration_by_text(text_content)
+            return output_path, duration
+        except Exception as exc:
+            last_error = exc
+            if attempt < 1:
+                await asyncio.sleep(0.35)
+
+    fallback_path = output_path.with_suffix(".wav")
+    duration = _estimate_duration_by_text(text_content)
+    _create_silent_wav(fallback_path, duration)
+    logger.warning(
+        "Edge TTS failed after retries, generated silent wav: voice=%s error=%s path=%s",
+        voice,
+        last_error,
+        fallback_path,
+    )
+    return fallback_path, duration
 
 
 def get_audio_duration(path: Path) -> float:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from difflib import SequenceMatcher
 import json
 import logging
 import re
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 _VOICE_ID_SET = {item.id for item in VOICE_INFOS}
 _VOICE_NAME_TO_ID = {item.name.lower(): item.id for item in VOICE_INFOS}
+_VOICE_ID_TO_GENDER = {item.id: str(item.gender or "").strip().lower() for item in VOICE_INFOS}
 
 
 class LLMServiceError(RuntimeError):
@@ -309,6 +311,15 @@ def segment_by_fixed(text: str, chunk_size: int = 120) -> list[str]:
     return [clean[index : index + chunk_size] for index in range(0, len(clean), chunk_size)]
 
 
+def _smart_segmentation_similarity(source_text: str, segments: list[str]) -> float:
+    source = re.sub(r"\s+", "", str(source_text or ""))
+    merged = re.sub(r"\s+", "", "".join(str(item or "") for item in (segments or [])))
+
+    if not source or not merged:
+        return 0.0
+    return float(SequenceMatcher(None, source, merged).ratio())
+
+
 async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
     clean_text = _normalize_segmentation_text(text)
     selected_model = model_id or settings.llm_default_model
@@ -339,7 +350,13 @@ async def segment_by_smart(text: str, model_id: str | None) -> list[str]:
             if parsed and isinstance(parsed.get("segments"), list):
                 segments = [str(item).strip() for item in parsed["segments"] if str(item).strip()]
                 if segments:
-                    return segments
+                    similarity = _smart_segmentation_similarity(clean_text, segments)
+                    if similarity >= 0.9:
+                        return segments
+                    logger.warning(
+                        "Smart segmentation output diverged from source (similarity=%.3f), fallback to sentence groups",
+                        similarity,
+                    )
     except Exception:
         logger.exception("Smart segmentation failed, fallback to sentence groups")
 
@@ -383,6 +400,56 @@ def _normalize_index_list(values: object, size: int, limit: int = 4) -> list[int
         output.append(index)
         if len(output) >= max(1, int(limit)):
             break
+    return output
+
+
+def _normalize_sentence_speaker_plan(
+    values: object,
+    sentence_count: int,
+    candidate_count: int,
+    default_primary_index: int | None,
+) -> list[dict[str, object]]:
+    if sentence_count <= 0:
+        return []
+
+    raw_items = values if isinstance(values, list) else []
+    output: list[dict[str, object]] = []
+    seen_sentence_indexes: set[int] = set()
+
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+
+        sentence_index = _normalize_index(raw.get("sentence_index"), sentence_count)
+        if sentence_index is None or sentence_index in seen_sentence_indexes:
+            continue
+
+        character_index = _normalize_index(raw.get("character_index"), candidate_count)
+        speaker_type = _clean_text(str(raw.get("speaker_type", "")), 20).lower()
+        if speaker_type not in {"narrator", "character"}:
+            speaker_type = "character" if character_index is not None else "narrator"
+
+        if speaker_type == "character" and character_index is None:
+            character_index = _normalize_index(default_primary_index, candidate_count)
+
+        confidence = 0.0
+        try:
+            confidence = max(0.0, min(1.0, float(raw.get("confidence", 0.0) or 0.0)))
+        except Exception:
+            confidence = 0.0
+
+        output.append(
+            {
+                "sentence_index": sentence_index,
+                "speaker_type": speaker_type,
+                "character_index": character_index,
+                "confidence": confidence,
+                "reason": _clean_text(str(raw.get("reason", "")), 180),
+            }
+        )
+        seen_sentence_indexes.add(sentence_index)
+
+    output.sort(key=lambda item: int(item.get("sentence_index", 0)))
     return output
 
 
@@ -551,10 +618,11 @@ def _fallback_segment_image_bundle(
         "metadata": _fallback_scene_metadata(segment_text, prompt),
         "character_assignment": {
             "primary_index": default_primary_index,
-            "related_indexes": [int(item) for item in (default_related_indexes or []) if isinstance(item, int)][:3],
+            "related_indexes": [int(item) for item in (default_related_indexes or []) if isinstance(item, int)][:4],
             "confidence": 0.0,
             "reason": "fallback",
         },
+        "tts_sentence_plan": [],
     }
 
 
@@ -608,7 +676,7 @@ async def build_segment_image_bundle(
         candidates = [character]
 
     safe_default_primary = _normalize_index(default_primary_index, len(candidates))
-    safe_default_related = _normalize_index_list(default_related_indexes, len(candidates), limit=3)
+    safe_default_related = _normalize_index_list(default_related_indexes, len(candidates), limit=4)
     if safe_default_primary is None and safe_default_related:
         safe_default_primary = safe_default_related[0]
     if safe_default_primary is None:
@@ -641,7 +709,7 @@ async def build_segment_image_bundle(
             "personality": _clean_text(character.personality, 400),
             "base_prompt": _clean_text(character.base_prompt, 800),
             "has_reference_image": bool(character.reference_image_path),
-            "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:2],
+            "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:3],
         },
         "story_world_context": world_context,
         "current_segment": _clean_text(segment_text, 1800),
@@ -649,14 +717,22 @@ async def build_segment_image_bundle(
             "previous_segment": _clean_text(previous_segment_text, 500),
             "next_segment": _clean_text(next_segment_text, 500),
         },
+        "tts_sentence_units": [
+            {"sentence_index": index, "sentence_text": _clean_text(sentence, 260)}
+            for index, sentence in enumerate(split_sentences(segment_text))
+            if _clean_text(sentence, 260)
+        ][:32],
         "character_candidates": [
             {
                 "index": index,
                 "name": _clean_text(item.name, 80),
                 "role": _clean_text(item.role, 80),
+                "gender": _normalize_character_gender(getattr(item, "gender", "unknown")),
                 "importance": max(1, min(10, int(item.importance or 5))),
                 "is_main_character": bool(item.is_main_character),
                 "is_story_self": bool(item.is_story_self),
+                "voice_id": _clean_text(item.voice_id, 80),
+                "voice_gender": _VOICE_ID_TO_GENDER.get((item.voice_id or "").strip(), "unknown"),
                 "has_reference_image": bool(item.reference_image_path),
             }
             for index, item in enumerate(candidates)
@@ -667,9 +743,18 @@ async def build_segment_image_bundle(
         },
         "output_schema": {
             "primary_index": 0,
-            "related_indexes": [0],
+            "related_indexes": [0, 1, 2, 3],
             "character_confidence": 0.0,
             "character_reason": "",
+            "sentence_speakers": [
+                {
+                    "sentence_index": 0,
+                    "speaker_type": "narrator",
+                    "character_index": None,
+                    "confidence": 0.0,
+                    "reason": "",
+                }
+            ],
             "prompt": "",
             "action_hint": "",
             "location_hint": "",
@@ -704,7 +789,7 @@ async def build_segment_image_bundle(
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
                 resolved_primary = _normalize_index((parsed or {}).get("primary_index"), len(candidates))
-                resolved_related = _normalize_index_list((parsed or {}).get("related_indexes"), len(candidates), limit=3)
+                resolved_related = _normalize_index_list((parsed or {}).get("related_indexes"), len(candidates), limit=4)
                 if resolved_primary is None and resolved_related:
                     resolved_primary = resolved_related[0]
                 if resolved_primary is None:
@@ -726,6 +811,14 @@ async def build_segment_image_bundle(
                     metadata["action_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("action_hint", "")
                 if not metadata.get("location_hint"):
                     metadata["location_hint"] = _fallback_scene_metadata(segment_text, final_prompt).get("location_hint", "")
+
+                sentence_count = len([item for item in request_body.get("tts_sentence_units", []) if isinstance(item, dict)])
+                sentence_plan = _normalize_sentence_speaker_plan(
+                    (parsed or {}).get("sentence_speakers"),
+                    sentence_count=sentence_count,
+                    candidate_count=len(candidates),
+                    default_primary_index=resolved_primary,
+                )
                 return {
                     "prompt": final_prompt,
                     "metadata": metadata,
@@ -735,6 +828,7 @@ async def build_segment_image_bundle(
                         "confidence": max(0.0, min(1.0, float((parsed or {}).get("character_confidence", 0.0) or 0.0))),
                         "reason": _clean_text(str((parsed or {}).get("character_reason", "")), 240),
                     },
+                    "tts_sentence_plan": sentence_plan,
                 }
     except Exception:
         logger.exception("LLM image prompt/metadata build failed, using fallback bundle")
@@ -792,15 +886,17 @@ def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
     output: list[CharacterSuggestion] = []
     for index, name in enumerate(ranked):
         role = "protagonist" if index == 0 else "supporting"
+        gender = "unknown"
         personality = "calm, decisive" if index == 0 else "kind, friendly"
         output.append(
             CharacterSuggestion(
                 name=name,
                 role=role,
+                gender=gender,
                 importance=max(10 - index, 5),
                 appearance="appearance to be completed",
                 personality=personality,
-                voice_id=recommend_voice(role, personality),
+                voice_id=recommend_voice(role, personality, gender_hint=gender),
                 base_prompt=f"{name}, {personality}, novel character illustration",
             )
         )
@@ -962,23 +1058,47 @@ async def generate_novel_aliases(text: str, count: int, model_id: str | None) ->
         raise LLMServiceError(f"LLM alias generation failed: {exc}") from exc
 
 
-def _normalize_voice_id(raw_voice: str | None, role: str, personality: str) -> str:
+def _normalize_character_gender(raw_gender: object) -> str:
+    text = str(raw_gender or "").strip().lower()
+    if text in {"male", "man", "m", "boy"}:
+        return "male"
+    if text in {"female", "woman", "f", "girl"}:
+        return "female"
+    return "unknown"
+
+
+def _voice_matches_gender(voice_id: str, gender: str) -> bool:
+    normalized_gender = _normalize_character_gender(gender)
+    if normalized_gender == "unknown":
+        return True
+    return _VOICE_ID_TO_GENDER.get(voice_id, "") == normalized_gender
+
+
+def _normalize_voice_id(raw_voice: str | None, role: str, personality: str, gender: str = "unknown") -> str:
     candidate = (raw_voice or "").strip()
-    if candidate in _VOICE_ID_SET:
+    if candidate in _VOICE_ID_SET and _voice_matches_gender(candidate, gender):
         return candidate
 
     lowered = candidate.lower()
     if lowered and lowered in _VOICE_NAME_TO_ID:
-        return _VOICE_NAME_TO_ID[lowered]
+        by_name = _VOICE_NAME_TO_ID[lowered]
+        if _voice_matches_gender(by_name, gender):
+            return by_name
 
     if lowered:
         for voice_id in _VOICE_ID_SET:
-            if voice_id.lower() in lowered:
+            if voice_id.lower() in lowered and _voice_matches_gender(voice_id, gender):
                 return voice_id
 
-    recommended = recommend_voice(role, personality)
+    recommended = recommend_voice(role, personality, gender_hint=gender)
     if recommended in _VOICE_ID_SET:
         return recommended
+
+    normalized_gender = _normalize_character_gender(gender)
+    if normalized_gender in {"male", "female"}:
+        for item in VOICE_INFOS:
+            if str(item.gender or "").strip().lower() == normalized_gender:
+                return item.id
 
     return VOICE_INFOS[0].id
 
@@ -1065,12 +1185,14 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
             characters: list[CharacterSuggestion] = []
             for item in raw_items:
                 role = str(item.get("role", "supporting"))
+                gender = _normalize_character_gender(item.get("gender"))
                 personality = str(item.get("personality", ""))
-                voice_id = _normalize_voice_id(item.get("voice_id"), role, personality)
+                voice_id = _normalize_voice_id(item.get("voice_id"), role, personality, gender=gender)
                 characters.append(
                     CharacterSuggestion(
                         name=str(item.get("name", "character")),
                         role=role,
+                        gender=gender,
                         importance=max(1, min(10, int(item.get("importance", 5)))),
                         is_main_character=_as_bool(item.get("is_main_character")),
                         is_story_self=_as_bool(item.get("is_story_self")),

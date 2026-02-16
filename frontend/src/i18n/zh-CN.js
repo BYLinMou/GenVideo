@@ -305,4 +305,84 @@ Object.assign(zhCN.field, {
   storySelf: '第一人称'
 })
 
+Object.assign(zhCN.field, {
+  manualFind: '查找',
+  manualReplace: '替换',
+  manualReplaceCaseSensitive: '区分大小写'
+})
+
+Object.assign(zhCN.placeholder, {
+  manualFind: '输入要查找的文本',
+  manualReplace: '输入替换后的文本'
+})
+
+Object.assign(zhCN.action, {
+  manualFindNext: '查找下一个',
+  manualReplaceAll: '全部替换'
+})
+
+Object.assign(zhCN.hint, {
+  manualFindSummary: '匹配 {current}/{total}'
+})
+
+Object.assign(zhCN.toast, {
+  manualReplaceFindRequired: '请先输入要查找的文本',
+  manualFindNoMatch: '未找到匹配内容',
+  manualReplaceNoMatch: '未找到匹配内容',
+  manualReplaceApplied: '已替换 {count} 处内容'
+})
+
+Object.assign(zhCN.action, {
+  deleteJob: '删除',
+  deleteFinalVideo: '删除成片'
+})
+
+Object.assign(zhCN.dialog || (zhCN.dialog = {}), {
+  confirmDelete: '确认删除',
+  cancelDelete: '取消',
+  deleteJobMessage: '确认删除任务 {id} 吗？这会删除该任务的数据库记录和临时中间文件，不会删除已生成的成片。',
+  deleteFinalVideoMessage: '确认删除成片 {filename} 吗？删除后会保留任务并回退为待合成状态（如果该任务仍存在）。'
+})
+
+Object.assign(zhCN.toast, {
+  jobDeleteSuccess: '任务 {id} 已删除',
+  jobDeleteFailed: '删除任务失败：{error}',
+  finalVideoDeleteSuccess: '成片 {filename} 已删除',
+  finalVideoDeleteFailed: '删除成片失败：{error}'
+})
+
+Object.assign(zhCN.hint, {
+  imageSourceBadgeCache: '缓存',
+  imageSourceBadgeGenerated: '新生成',
+  imageSourceBadgeReference: '人设图',
+  imageSourceBadgeOther: '其他',
+  imageSourceTagCache: '缓存命中',
+  imageSourceTagGenerated: '新生成',
+  imageSourceTagFallbackLlm: 'LLM兜底缓存',
+  imageSourceTagFallbackCache: '兜底缓存',
+  imageSourceTagFallbackCharacterCache: '角色缓存兜底',
+  imageSourceTagFallbackSceneOnlyCache: '场景缓存兜底',
+  imageSourceTagFallbackReference: '人设图兜底',
+  imageSourceTagFallbackRandomCache: '随机缓存兜底',
+  imageSourceTagOther: '其他来源'
+})
+
+Object.assign(zhCN.placeholder, {
+  referenceImageSearch: '搜索参考图文件名'
+})
+
+Object.assign(zhCN.hint, {
+  noRefImageSearchResult: '没有匹配的参考图，请换个关键词。'
+})
+
+Object.assign(zhCN.field, {
+  gender: '性别'
+})
+
+Object.assign(zhCN.option, {
+  genderUnknown: '未知',
+  genderMale: '男',
+  genderFemale: '女'
+})
+
 export default zhCN

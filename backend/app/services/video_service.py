@@ -24,6 +24,7 @@ from ..voice_catalog import VOICE_INFOS, recommend_voice
 from .image_service import ImageGenerationError, use_reference_or_generate
 from .llm_service import (
     build_segment_image_bundle,
+    split_sentences,
     summarize_story_world_context,
 )
 from .segmentation_service import build_segment_plan, resolve_precomputed_segments, select_segments_by_range
@@ -57,6 +58,18 @@ _DIALOG_QUOTE_PAIRS = {
     '"': '"',
     "\u201c": "\u201d",  # “ ”
 }
+
+
+_VOICE_ID_TO_GENDER = {item.id: str(item.gender or "").strip().lower() for item in VOICE_INFOS}
+
+
+def _normalize_character_gender(value: object) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"male", "man", "m", "boy"}:
+        return "male"
+    if text in {"female", "woman", "f", "girl"}:
+        return "female"
+    return "unknown"
 
 
 def _ffmpeg_escape_text(text: str) -> str:
@@ -706,7 +719,7 @@ def _coerce_character_indexes(values: object, size: int, limit: int = 4) -> list
     return output
 
 
-def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 2) -> list[str]:
+def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 3) -> list[str]:
     output: list[str] = []
     seen: set[str] = set()
     for item in characters:
@@ -715,6 +728,34 @@ def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int =
             continue
         key = raw.replace("\\", "/").lower()
         if key in seen:
+            continue
+        path = Path(raw)
+        if not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        seen.add(key)
+        output.append(raw)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
+
+
+def _collect_related_reference_paths(
+    primary: CharacterSuggestion | None,
+    characters: list[CharacterSuggestion],
+    limit: int = 3,
+) -> list[str]:
+    primary_key = _normalize_path_key((primary.reference_image_path if primary else "") or "")
+    output: list[str] = []
+    seen: set[str] = set()
+
+    for item in characters:
+        raw = (item.reference_image_path or "").strip()
+        if not raw:
+            continue
+        key = _normalize_path_key(raw)
+        if not key or key in seen:
+            continue
+        if primary_key and key == primary_key:
             continue
         path = Path(raw)
         if not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -825,32 +866,25 @@ def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_v
     if narrator_voice not in available:
         narrator_voice = available[0] if available else _NARRATOR_VOICE_ID
 
-    used: set[str] = {narrator_voice}
-    prioritized = sorted(
-        characters,
-        key=lambda item: int(item.importance or 0),
-        reverse=True,
-    )
-
-    for character in prioritized:
+    for character in characters:
         current = (character.voice_id or "").strip()
-        if current and current not in used and current in available:
-            used.add(current)
+        if current in available:
+            character.voice_id = current
             continue
 
-        recommended = recommend_voice(character.role or "", character.personality or "")
-        if recommended and recommended in available and recommended not in used:
+        gender = _normalize_character_gender(getattr(character, "gender", "unknown"))
+        recommended = recommend_voice(character.role or "", character.personality or "", gender_hint=gender)
+        if recommended in available:
             character.voice_id = recommended
-            used.add(recommended)
             continue
 
-        fallback = next((voice_id for voice_id in available if voice_id not in used), None)
-        if fallback:
-            character.voice_id = fallback
-            used.add(fallback)
-            continue
+        if gender in {"male", "female"}:
+            gender_fallback = next((voice_id for voice_id in available if _VOICE_ID_TO_GENDER.get(voice_id, "") == gender), None)
+            if gender_fallback:
+                character.voice_id = gender_fallback
+                continue
 
-        character.voice_id = current if current in available else narrator_voice
+        character.voice_id = narrator_voice
 
     return characters
 
@@ -882,11 +916,28 @@ def _extract_quote_blocks(text: str) -> list[tuple[str, int, int]]:
     return blocks
 
 
-def _pick_dialogue_voice(characters: list[CharacterSuggestion], dialog_index: int, narrator_voice: str) -> str:
-    available = [item for item in characters if (item.voice_id or "").strip() and item.voice_id != narrator_voice]
-    if not available:
-        return narrator_voice
-    return available[dialog_index % len(available)].voice_id
+def _pick_dialogue_voice(
+    characters: list[CharacterSuggestion],
+    narrator_voice: str,
+    preferred_character: CharacterSuggestion | None = None,
+) -> str:
+    if preferred_character is not None:
+        preferred_voice = (preferred_character.voice_id or "").strip()
+        if preferred_voice and preferred_voice != narrator_voice:
+            return preferred_voice
+
+    pivot = _pick_story_self_character(characters)
+    if pivot is not None:
+        pivot_voice = (pivot.voice_id or "").strip()
+        if pivot_voice and pivot_voice != narrator_voice:
+            return pivot_voice
+
+    for item in characters:
+        current_voice = (item.voice_id or "").strip()
+        if current_voice and current_voice != narrator_voice:
+            return current_voice
+
+    return narrator_voice
 
 
 def _merge_tts_pieces(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
@@ -903,10 +954,65 @@ def _merge_tts_pieces(pieces: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return merged
 
 
-def _build_tts_pieces(text: str, characters: list[CharacterSuggestion], narrator_voice: str) -> list[tuple[str, str]]:
+def _build_tts_pieces(
+    text: str,
+    characters: list[CharacterSuggestion],
+    narrator_voice: str,
+    sentence_plan: list[dict] | None = None,
+) -> list[tuple[str, str]]:
     clean = (text or "").strip()
     if not clean:
         return []
+
+    default_dialogue_character = _pick_story_self_character(characters)
+
+    if sentence_plan:
+        sentence_units = split_sentences(clean)
+        if sentence_units:
+            plan_by_index: dict[int, dict] = {}
+            for item in sentence_plan:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    sentence_index = int(item.get("sentence_index"))
+                except Exception:
+                    continue
+                if sentence_index < 0 or sentence_index >= len(sentence_units):
+                    continue
+                if sentence_index in plan_by_index:
+                    continue
+                plan_by_index[sentence_index] = item
+
+            planned_pieces: list[tuple[str, str]] = []
+            for sentence_index, sentence_text in enumerate(sentence_units):
+                plan_item = plan_by_index.get(sentence_index)
+                if not plan_item:
+                    planned_pieces.append((sentence_text, narrator_voice))
+                    continue
+
+                speaker_type = str(plan_item.get("speaker_type") or "narrator").strip().lower()
+                character_index = None
+                try:
+                    character_index = int(plan_item.get("character_index"))
+                except Exception:
+                    character_index = None
+
+                if speaker_type == "character":
+                    if character_index is not None and 0 <= character_index < len(characters):
+                        voice = (characters[character_index].voice_id or "").strip() or narrator_voice
+                    else:
+                        voice = _pick_dialogue_voice(
+                            characters,
+                            narrator_voice,
+                            preferred_character=default_dialogue_character,
+                        )
+                    planned_pieces.append((sentence_text, voice))
+                else:
+                    planned_pieces.append((sentence_text, narrator_voice))
+
+            merged_planned = _merge_tts_pieces(planned_pieces)
+            if merged_planned:
+                return merged_planned
 
     quotes = _extract_quote_blocks(clean)
     if not quotes:
@@ -914,7 +1020,6 @@ def _build_tts_pieces(text: str, characters: list[CharacterSuggestion], narrator
 
     pieces: list[tuple[str, str]] = []
     cursor = 0
-    dialog_index = 0
     for quoted, quote_start, quote_end in quotes:
         if quote_start < cursor:
             continue
@@ -925,8 +1030,16 @@ def _build_tts_pieces(text: str, characters: list[CharacterSuggestion], narrator
         if narration:
             pieces.append((narration, narrator_voice))
 
-        pieces.append((quoted, _pick_dialogue_voice(characters, dialog_index, narrator_voice)))
-        dialog_index += 1
+        pieces.append(
+            (
+                quoted,
+                _pick_dialogue_voice(
+                    characters,
+                    narrator_voice,
+                    preferred_character=default_dialogue_character,
+                ),
+            )
+        )
         cursor = quote_end + 1
 
     tail = clean[cursor:].strip()
@@ -943,8 +1056,9 @@ async def _synthesize_segment_tts(
     characters: list[CharacterSuggestion],
     output_path: Path,
     narrator_voice: str = _NARRATOR_VOICE_ID,
+    sentence_plan: list[dict] | None = None,
 ) -> tuple[Path, float]:
-    parts = _build_tts_pieces(text, characters, narrator_voice)
+    parts = _build_tts_pieces(text, characters, narrator_voice, sentence_plan=sentence_plan)
     if not parts:
         return await synthesize_tts(text=text, voice=narrator_voice, output_path=output_path)
 
@@ -1642,6 +1756,45 @@ def _cleanup_segment_artifacts(temp_root: Path, segment_index: int) -> None:
             logger.debug("Failed to cleanup artifact: %s", target)
 
 
+def _clip_has_audio_stream(clip_path: Path) -> bool:
+    ffprobe_bin = shutil.which("ffprobe")
+    if not ffprobe_bin:
+        return True
+
+    cmd = [
+        ffprobe_bin,
+        "-v",
+        "error",
+        "-select_streams",
+        "a:0",
+        "-show_entries",
+        "stream=codec_type",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(clip_path),
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+    except Exception:
+        return False
+
+    if proc.returncode != 0:
+        return False
+    return "audio" in str(proc.stdout or "").lower()
+
+
+def _is_valid_clip_checkpoint(clip_path: Path, min_bytes: int = 8192) -> bool:
+    if not clip_path.exists() or not clip_path.is_file():
+        return False
+    try:
+        if int(clip_path.stat().st_size) < int(min_bytes):
+            return False
+    except Exception:
+        return False
+
+    return _clip_has_audio_stream(clip_path)
+
+
 def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> list[str]:
     clip_paths: list[str] = []
     total = max(0, int(total_segments or 0))
@@ -1649,6 +1802,8 @@ def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> lis
         clip_path = clip_root / f"clip_{index:04d}.mp4"
         if not clip_path.exists() or not clip_path.is_file():
             raise FileNotFoundError(f"Missing segment clip for compose: {clip_path}")
+        if not _clip_has_audio_stream(clip_path):
+            raise FileNotFoundError(f"Segment clip has no audio stream: {clip_path}")
         clip_paths.append(str(clip_path))
     return clip_paths
     try:
@@ -1657,7 +1812,16 @@ def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> lis
         return False
 
 
-def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, object] | None:
+def _normalize_clip_image_sources(values: list[str] | None) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(item or "") for item in values]
+
+
+def _build_image_source_report(
+    source_counts: dict[str, int],
+    clip_image_sources: list[str] | None = None,
+) -> dict[str, object] | None:
     normalized = {str(key): max(0, int(value or 0)) for key, value in (source_counts or {}).items()}
     total_images = sum(normalized.values())
     if total_images <= 0:
@@ -1689,6 +1853,7 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
         "reference_ratio": _ratio(reference_images),
         "other_ratio": _ratio(other_images),
         "source_counts": normalized,
+        "clip_sources": _normalize_clip_image_sources(clip_image_sources),
     }
 
 
@@ -1707,6 +1872,15 @@ def _extract_source_counts_from_report(report: dict[str, object] | None) -> dict
     return output
 
 
+def _extract_clip_sources_from_report(report: dict[str, object] | None) -> list[str]:
+    if not isinstance(report, dict):
+        return []
+    raw_clip_sources = report.get("clip_sources")
+    if not isinstance(raw_clip_sources, list):
+        return []
+    return [str(item or "") for item in raw_clip_sources]
+
+
 def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> dict[str, int]:
     current = job_store.get(job_id)
     if not current:
@@ -1720,6 +1894,17 @@ def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> 
     return merged
 
 
+def _restore_clip_image_sources(job_id: str) -> list[str]:
+    current = job_store.get(job_id)
+    if not current:
+        return []
+
+    if current.clip_image_sources:
+        return [str(item or "") for item in current.clip_image_sources]
+
+    return _extract_clip_sources_from_report(current.image_source_report)
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1731,6 +1916,7 @@ def _update_job(
     total_segments: int = 0,
     output_video_path: str | None = None,
     clip_count: int | None = None,
+    clip_image_sources: list[str] | None = None,
     image_source_report: dict[str, object] | None = None,
 ) -> None:
     current = job_store.get(job_id)
@@ -1738,6 +1924,11 @@ def _update_job(
     resolved_image_source_report = image_source_report
     if resolved_image_source_report is None and current is not None:
         resolved_image_source_report = current.image_source_report
+    resolved_clip_image_sources = clip_image_sources
+    if resolved_clip_image_sources is None and current is not None:
+        resolved_clip_image_sources = current.clip_image_sources
+    resolved_clip_image_sources = _normalize_clip_image_sources(resolved_clip_image_sources)
+
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1751,6 +1942,7 @@ def _update_job(
             output_video_path=output_video_path,
             clip_count=resolved_clip_count,
             clip_preview_urls=[],
+            clip_image_sources=resolved_clip_image_sources,
             image_source_report=resolved_image_source_report,
         )
     )
@@ -1914,6 +2106,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "other": 0,
     }
     image_source_counts = _restore_image_source_counts(job_id, image_source_counts)
+    clip_image_sources = _restore_clip_image_sources(job_id)
     restored_image_count = sum(max(0, int(value or 0)) for value in image_source_counts.values())
     if restored_image_count > 0:
         logger.info("Restored persisted image source counts for job %s: total=%s", job_id, restored_image_count)
@@ -2008,29 +2201,36 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
             character = default_character
             related_characters = list(default_related_characters)
-            related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+            related_reference_paths = _collect_related_reference_paths(character, related_characters, limit=3)
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
             clip_path = clip_root / f"clip_{index:04d}.mp4"
 
             if clip_path.exists() and clip_path.is_file():
-                rendered_clip_count += 1
-                completed_ratio = (index + 1) / max(total, 1)
-                _update_job(
-                    job_id,
-                    base_url,
-                    "running",
-                    stage_start + completed_ratio * stage_span,
-                    "render-segment",
-                    f"Scene {index + 1}/{total} resumed from checkpoint",
-                    current_segment=index + 1,
-                    total_segments=total,
-                    clip_count=rendered_clip_count,
-                )
-                _cleanup_segment_artifacts(temp_root, index)
-                gc.collect()
-                continue
+                if not _is_valid_clip_checkpoint(clip_path):
+                    logger.warning("Segment %s checkpoint clip invalid, regenerate: %s", index + 1, clip_path)
+                    try:
+                        clip_path.unlink(missing_ok=True)
+                    except Exception:
+                        logger.debug("Failed to remove invalid clip checkpoint: %s", clip_path)
+                else:
+                    rendered_clip_count += 1
+                    completed_ratio = (index + 1) / max(total, 1)
+                    _update_job(
+                        job_id,
+                        base_url,
+                        "running",
+                        stage_start + completed_ratio * stage_span,
+                        "render-segment",
+                        f"Scene {index + 1}/{total} resumed from checkpoint",
+                        current_segment=index + 1,
+                        total_segments=total,
+                        clip_count=rendered_clip_count,
+                    )
+                    _cleanup_segment_artifacts(temp_root, index)
+                    gc.collect()
+                    continue
 
             prompt_task = asyncio.create_task(
                 build_segment_image_bundle(
@@ -2046,22 +2246,14 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     default_related_indexes=default_related_indexes,
                 )
             )
-            audio_task = asyncio.create_task(
-                _synthesize_segment_tts(
-                    text=segment_text,
-                    characters=characters,
-                    output_path=audio_path,
-                    narrator_voice=_NARRATOR_VOICE_ID,
-                )
-            )
-
             prompt_bundle = await prompt_task
             prompt = str(prompt_bundle.get("prompt") or "").strip()
             scene_metadata = prompt_bundle.get("metadata") or {}
+            tts_sentence_plan = prompt_bundle.get("tts_sentence_plan") if isinstance(prompt_bundle.get("tts_sentence_plan"), list) else []
 
             assignment = prompt_bundle.get("character_assignment") if isinstance(prompt_bundle.get("character_assignment"), dict) else {}
             resolved_primary_index = _coerce_character_index(assignment.get("primary_index"), len(characters))
-            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=3)
+            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=4)
 
             if resolved_primary_index is None:
                 resolved_primary_index = default_primary_index
@@ -2080,7 +2272,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 related_characters = selected_related or [selected_character]
                 if character not in related_characters:
                     related_characters.insert(0, character)
-                related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+                related_reference_paths = _collect_related_reference_paths(character, related_characters, limit=3)
                 logger.info(
                     "Segment %s character assignment from prompt call: primary=%s confidence=%.2f reason=%s",
                     index + 1,
@@ -2104,6 +2296,15 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     recent_reuse_entry_ids=set(recent_scene_entry_ids),
                 )
             )
+            audio_task = asyncio.create_task(
+                _synthesize_segment_tts(
+                    text=segment_text,
+                    characters=characters,
+                    output_path=audio_path,
+                    narrator_voice=_NARRATOR_VOICE_ID,
+                    sentence_plan=tts_sentence_plan,
+                )
+            )
 
             image_bundle, audio_bundle = await asyncio.gather(image_task, audio_task)
             image_result, image_source, reused_entry_id = image_bundle
@@ -2119,6 +2320,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             }
             source_key = source_key_map.get(str(image_source or ""), "other")
             image_source_counts[source_key] = int(image_source_counts.get(source_key, 0) or 0) + 1
+            while len(clip_image_sources) <= index:
+                clip_image_sources.append("")
+            clip_image_sources[index] = str(image_source or "")
 
             if lookback_scenes > 0 and reused_entry_id:
                 recent_scene_entry_ids.append(str(reused_entry_id))
@@ -2153,7 +2357,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=index + 1,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
 
         if job_store.is_cancelled(job_id):
@@ -2167,7 +2372,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2195,7 +2401,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 total_segments=total,
                 output_video_path=str(final_path),
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2240,7 +2447,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2255,7 +2463,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             total_segments=total,
             output_video_path=str(final_path),
             clip_count=rendered_clip_count,
-            image_source_report=_build_image_source_report(image_source_counts),
+            clip_image_sources=clip_image_sources,
+            image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
         )
     except Exception as exc:
         logger.exception("Video job failed: %s", job_id)
@@ -2267,7 +2476,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             "error",
             f"Video generation failed: {exc}",
             clip_count=rendered_clip_count,
-            image_source_report=_build_image_source_report(image_source_counts),
+            clip_image_sources=clip_image_sources,
+            image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
         )
     finally:
         job_store.clear_cancel(job_id)
@@ -2351,6 +2561,8 @@ def cancel_job(job_id: str, base_url: str) -> bool:
                 output_video_path=current.output_video_path,
                 clip_count=current.clip_count,
                 clip_preview_urls=current.clip_preview_urls,
+                clip_image_sources=current.clip_image_sources,
+                image_source_report=current.image_source_report,
             )
         )
     return True
