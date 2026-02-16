@@ -3051,10 +3051,10 @@ onUnmounted(() => {
             <div class="final-video-name">{{ item.filename }}</div>
             <div class="muted">{{ t('hint.finalVideoCreatedAt', { time: formatDateTime(item.createdAt) }) }}</div>
             <div class="muted">{{ t('hint.finalVideoSize', { size: formatFileSize(item.size) }) }}</div>
-            <div class="actions">
-              <el-button text @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
-              <a :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
-              <el-button text type="danger" @click="deleteFinalVideo(item)">{{ t('action.deleteFinalVideo') }}</el-button>
+            <div class="actions final-video-actions">
+              <el-button class="final-video-action" @click="enableFinalVideo(item, index)">{{ t('action.openFinalVideo') }}</el-button>
+              <a class="final-video-action final-video-link" :href="item.downloadUrl" target="_blank" rel="noopener noreferrer" download>{{ t('action.downloadFinal') }}</a>
+              <el-button class="final-video-action final-video-action-danger" @click="deleteFinalVideo(item)">{{ t('action.deleteFinalVideo') }}</el-button>
             </div>
           </article>
         </div>

@@ -477,6 +477,48 @@ label {
   word-break: break-all;
 }
 
+.final-video-actions {
+  gap: 8px;
+  margin-bottom: 0;
+  flex-wrap: wrap;
+}
+
+.final-video-action.el-button,
+.final-video-link.final-video-action {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #d0d5dd;
+  background: #ffffff;
+  color: #344054;
+  font-size: 13px;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: all 0.16s ease;
+}
+
+.final-video-action.el-button:hover,
+.final-video-link.final-video-action:hover {
+  border-color: #98a2b3;
+  background: #f9fafb;
+  color: #1d2939;
+}
+
+.final-video-action-danger.el-button {
+  border-color: #fda29b;
+  color: #b42318;
+  background: #fff5f5;
+}
+
+.final-video-action-danger.el-button:hover {
+  border-color: #f97066;
+  color: #912018;
+  background: #ffe4e1;
+}
+
 .clip-thumb-wrap {
   position: relative;
   cursor: pointer;
