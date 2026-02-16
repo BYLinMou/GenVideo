@@ -182,6 +182,18 @@ const imageSourceSummary = computed(() => {
   }
 })
 
+const imageSourceLiveBadges = computed(() => {
+  const report = imageSourceSummary.value
+  if (!report) return []
+  const items = [
+    { key: 'cache', label: t('hint.imageSourceBadgeCache'), count: report.cache_images, ratio: report.cacheRatioText },
+    { key: 'generated', label: t('hint.imageSourceBadgeGenerated'), count: report.generated_images, ratio: report.generatedRatioText },
+    { key: 'reference', label: t('hint.imageSourceBadgeReference'), count: report.reference_images, ratio: formatRatioPercent(report.reference_ratio) },
+    { key: 'other', label: t('hint.imageSourceBadgeOther'), count: report.other_images, ratio: report.otherRatioText },
+  ]
+  return items.filter((item) => item.count > 0)
+})
+
 const bgmStatus = reactive({
   exists: false,
   filename: 'bgm.mp3',
@@ -995,6 +1007,17 @@ function normalizeImageSourceReport(raw) {
   }
   const total = toInt(raw.total_images)
   if (!total) return null
+
+  const sourceCounts = raw.source_counts && typeof raw.source_counts === 'object'
+    ? Object.fromEntries(
+        Object.entries(raw.source_counts).map(([key, value]) => [String(key), toInt(value)])
+      )
+    : {}
+
+  const clipSources = Array.isArray(raw.clip_sources)
+    ? raw.clip_sources.map((item) => String(item || ''))
+    : []
+
   return {
     total_images: total,
     cache_images: toInt(raw.cache_images),
@@ -1004,8 +1027,65 @@ function normalizeImageSourceReport(raw) {
     cache_ratio: toRatio(raw.cache_ratio),
     generate_ratio: toRatio(raw.generate_ratio),
     reference_ratio: toRatio(raw.reference_ratio),
-    other_ratio: toRatio(raw.other_ratio)
+    other_ratio: toRatio(raw.other_ratio),
+    source_counts: sourceCounts,
+    clip_sources: clipSources,
   }
+}
+
+function normalizeClipSourceKey(source) {
+  const raw = String(source || '').trim().toLowerCase()
+  if (!raw) return ''
+  const normalized = raw.replaceAll('-', '_')
+  const known = new Set([
+    'cache',
+    'generated',
+    'fallback_llm',
+    'fallback_cache',
+    'fallback_character_cache',
+    'fallback_scene_only_cache',
+    'fallback_reference',
+    'fallback_random_cache',
+    'other',
+  ])
+  return known.has(normalized) ? normalized : 'other'
+}
+
+function clipSourceLabel(source) {
+  const key = normalizeClipSourceKey(source)
+  if (!key) return ''
+  const labels = {
+    cache: t('hint.imageSourceTagCache'),
+    generated: t('hint.imageSourceTagGenerated'),
+    fallback_llm: t('hint.imageSourceTagFallbackLlm'),
+    fallback_cache: t('hint.imageSourceTagFallbackCache'),
+    fallback_character_cache: t('hint.imageSourceTagFallbackCharacterCache'),
+    fallback_scene_only_cache: t('hint.imageSourceTagFallbackSceneOnlyCache'),
+    fallback_reference: t('hint.imageSourceTagFallbackReference'),
+    fallback_random_cache: t('hint.imageSourceTagFallbackRandomCache'),
+    other: t('hint.imageSourceTagOther'),
+  }
+  return labels[key] || t('hint.imageSourceTagOther')
+}
+
+const clipSourceMetaList = computed(() => {
+  const report = normalizeImageSourceReport(job.imageSourceReport)
+  const clipSources = Array.isArray(report?.clip_sources) ? report.clip_sources : []
+  return clipSources.map((source) => {
+    const key = normalizeClipSourceKey(source)
+    if (!key) return null
+    return {
+      key,
+      label: clipSourceLabel(key),
+      className: `source-${key}`,
+    }
+  })
+})
+
+function getClipSourceMeta(index) {
+  const idx = Number(index)
+  if (!Number.isFinite(idx) || idx < 0) return null
+  return clipSourceMetaList.value[idx] || null
 }
 
 function formatRatioPercent(value) {
@@ -1380,6 +1460,13 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
   if (!id || !status) return null
   const createdAtMs = parseApiTimeToMs(status.created_at)
   const updatedAtMs = parseApiTimeToMs(status.updated_at)
+  const imageSourceReportPayload = {
+    ...(status.image_source_report && typeof status.image_source_report === 'object' ? status.image_source_report : {}),
+  }
+  if (Array.isArray(status.clip_image_sources)) {
+    imageSourceReportPayload.clip_sources = status.clip_image_sources.map((item) => String(item || ''))
+  }
+
   const next = {
     id,
     status: status.status || '',
@@ -1389,7 +1476,7 @@ function syncActiveJobRecordFromApiStatus(jobId, status) {
     currentSegment: Number(status.current_segment || 0),
     totalSegments: Number(status.total_segments || 0),
     clipPreviewUrls: (status.clip_preview_urls || []).map((item) => normalizeRuntimeUrl(item)),
-    imageSourceReport: normalizeImageSourceReport(status.image_source_report),
+    imageSourceReport: normalizeImageSourceReport(imageSourceReportPayload),
     videoUrl: status.status === 'completed' ? normalizeRuntimeUrl(status.output_video_url || api.getVideoUrl(id)) : '',
     updatedAt: updatedAtMs || Date.now(),
     createdAt: createdAtMs || undefined
@@ -2842,11 +2929,41 @@ onUnmounted(() => {
         </el-progress>
         <p><strong>{{ t('hint.overallProgress') }}：</strong>{{ uiProgressPercent }}%</p>
         <el-progress :percentage="uiProgressPercent" :status="job.status === 'failed' ? 'exception' : (job.status === 'completed' ? 'success' : '')" />
+        <div v-if="imageSourceSummary" class="image-source-live">
+          <p class="muted">
+            {{ t('hint.imageSourceReportSummary', {
+              cache: imageSourceSummary.cache_images,
+              generated: imageSourceSummary.generated_images,
+              total: imageSourceSummary.total_images,
+              cacheRatio: imageSourceSummary.cacheRatioText,
+              generatedRatio: imageSourceSummary.generatedRatioText
+            }) }}
+          </p>
+          <div class="image-source-badges">
+            <span
+              v-for="item in imageSourceLiveBadges"
+              :key="`img-source-badge-${item.key}`"
+              class="image-source-badge"
+              :class="`source-${item.key}`"
+            >
+              {{ item.label }} {{ item.count }}/{{ imageSourceSummary.total_images }} · {{ item.ratio }}
+            </span>
+          </div>
+        </div>
       </div>
 
       <div v-if="job.clipPreviewUrls.length" class="clip-grid">
         <div v-for="(url, index) in job.clipPreviewUrls" :key="`${job.id}-${index}`" class="clip-item">
-          <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
+          <div class="clip-head">
+            <p>{{ t('hint.clip', { index: index + 1 }) }}</p>
+            <span
+              v-if="getClipSourceMeta(index)"
+              class="clip-source-pill"
+              :class="getClipSourceMeta(index).className"
+            >
+              {{ getClipSourceMeta(index).label }}
+            </span>
+          </div>
           <div
             v-if="!isClipVideoEnabled(index)"
             class="clip-thumb-wrap"

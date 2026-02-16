@@ -901,6 +901,7 @@ async def delete_final_video(filename: str) -> dict:
             output_video_path=None,
             clip_count=clip_count,
             clip_preview_urls=status.clip_preview_urls,
+            clip_image_sources=status.clip_image_sources,
             image_source_report=status.image_source_report,
             created_at=status.created_at,
             updated_at=status.updated_at,

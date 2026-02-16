@@ -155,6 +155,7 @@ class JobStatus(BaseModel):
     output_video_path: str | None = None
     clip_count: int = 0
     clip_preview_urls: list[str] = Field(default_factory=list)
+    clip_image_sources: list[str] = Field(default_factory=list)
     image_source_report: dict[str, object] | None = None
     created_at: str | None = None
     updated_at: str | None = None

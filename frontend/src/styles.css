@@ -175,6 +175,29 @@ label {
   margin: 6px 0;
 }
 
+.image-source-live {
+  margin-top: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.image-source-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.image-source-badge {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #d0d5dd;
+  border-radius: 999px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: #344054;
+  background: #f8fafc;
+}
+
 .job-restore-row {
   display: flex;
   gap: 10px;
@@ -375,6 +398,53 @@ label {
   border: 1px solid #eaecf0;
   border-radius: 10px;
   padding: 10px;
+}
+
+.clip-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.clip-source-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 2px 10px;
+  border: 1px solid #d0d5dd;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: nowrap;
+  color: #344054;
+  background: #f8fafc;
+}
+
+.source-cache {
+  border-color: #98a2b3;
+  background: #f2f4f7;
+}
+
+.source-generated {
+  border-color: #f79009;
+  background: #fffaeb;
+}
+
+.source-reference {
+  border-color: #36bffa;
+  background: #f0f9ff;
+}
+
+.source-fallback_llm,
+.source-fallback_cache,
+.source-fallback_character_cache,
+.source-fallback_scene_only_cache,
+.source-fallback_reference,
+.source-fallback_random_cache,
+.source-other {
+  border-color: #b692f6;
+  background: #f9f5ff;
 }
 
 .final-video-grid {

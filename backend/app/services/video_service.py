@@ -1779,7 +1779,16 @@ def _collect_clip_paths_for_compose(clip_root: Path, total_segments: int) -> lis
         return False
 
 
-def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, object] | None:
+def _normalize_clip_image_sources(values: list[str] | None) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [str(item or "") for item in values]
+
+
+def _build_image_source_report(
+    source_counts: dict[str, int],
+    clip_image_sources: list[str] | None = None,
+) -> dict[str, object] | None:
     normalized = {str(key): max(0, int(value or 0)) for key, value in (source_counts or {}).items()}
     total_images = sum(normalized.values())
     if total_images <= 0:
@@ -1811,6 +1820,7 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
         "reference_ratio": _ratio(reference_images),
         "other_ratio": _ratio(other_images),
         "source_counts": normalized,
+        "clip_sources": _normalize_clip_image_sources(clip_image_sources),
     }
 
 
@@ -1829,6 +1839,15 @@ def _extract_source_counts_from_report(report: dict[str, object] | None) -> dict
     return output
 
 
+def _extract_clip_sources_from_report(report: dict[str, object] | None) -> list[str]:
+    if not isinstance(report, dict):
+        return []
+    raw_clip_sources = report.get("clip_sources")
+    if not isinstance(raw_clip_sources, list):
+        return []
+    return [str(item or "") for item in raw_clip_sources]
+
+
 def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> dict[str, int]:
     current = job_store.get(job_id)
     if not current:
@@ -1842,6 +1861,17 @@ def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> 
     return merged
 
 
+def _restore_clip_image_sources(job_id: str) -> list[str]:
+    current = job_store.get(job_id)
+    if not current:
+        return []
+
+    if current.clip_image_sources:
+        return [str(item or "") for item in current.clip_image_sources]
+
+    return _extract_clip_sources_from_report(current.image_source_report)
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1853,6 +1883,7 @@ def _update_job(
     total_segments: int = 0,
     output_video_path: str | None = None,
     clip_count: int | None = None,
+    clip_image_sources: list[str] | None = None,
     image_source_report: dict[str, object] | None = None,
 ) -> None:
     current = job_store.get(job_id)
@@ -1860,6 +1891,11 @@ def _update_job(
     resolved_image_source_report = image_source_report
     if resolved_image_source_report is None and current is not None:
         resolved_image_source_report = current.image_source_report
+    resolved_clip_image_sources = clip_image_sources
+    if resolved_clip_image_sources is None and current is not None:
+        resolved_clip_image_sources = current.clip_image_sources
+    resolved_clip_image_sources = _normalize_clip_image_sources(resolved_clip_image_sources)
+
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1873,6 +1909,7 @@ def _update_job(
             output_video_path=output_video_path,
             clip_count=resolved_clip_count,
             clip_preview_urls=[],
+            clip_image_sources=resolved_clip_image_sources,
             image_source_report=resolved_image_source_report,
         )
     )
@@ -2036,6 +2073,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "other": 0,
     }
     image_source_counts = _restore_image_source_counts(job_id, image_source_counts)
+    clip_image_sources = _restore_clip_image_sources(job_id)
     restored_image_count = sum(max(0, int(value or 0)) for value in image_source_counts.values())
     if restored_image_count > 0:
         logger.info("Restored persisted image source counts for job %s: total=%s", job_id, restored_image_count)
@@ -2249,6 +2287,9 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             }
             source_key = source_key_map.get(str(image_source or ""), "other")
             image_source_counts[source_key] = int(image_source_counts.get(source_key, 0) or 0) + 1
+            while len(clip_image_sources) <= index:
+                clip_image_sources.append("")
+            clip_image_sources[index] = str(image_source or "")
 
             if lookback_scenes > 0 and reused_entry_id:
                 recent_scene_entry_ids.append(str(reused_entry_id))
@@ -2283,7 +2324,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=index + 1,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
 
         if job_store.is_cancelled(job_id):
@@ -2297,7 +2339,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2325,7 +2368,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 total_segments=total,
                 output_video_path=str(final_path),
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2370,7 +2414,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=total,
                 total_segments=total,
                 clip_count=rendered_clip_count,
-                image_source_report=_build_image_source_report(image_source_counts),
+                clip_image_sources=clip_image_sources,
+                image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
             )
             return
 
@@ -2385,7 +2430,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             total_segments=total,
             output_video_path=str(final_path),
             clip_count=rendered_clip_count,
-            image_source_report=_build_image_source_report(image_source_counts),
+            clip_image_sources=clip_image_sources,
+            image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
         )
     except Exception as exc:
         logger.exception("Video job failed: %s", job_id)
@@ -2397,7 +2443,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             "error",
             f"Video generation failed: {exc}",
             clip_count=rendered_clip_count,
-            image_source_report=_build_image_source_report(image_source_counts),
+            clip_image_sources=clip_image_sources,
+            image_source_report=_build_image_source_report(image_source_counts, clip_image_sources),
         )
     finally:
         job_store.clear_cancel(job_id)
@@ -2481,6 +2528,8 @@ def cancel_job(job_id: str, base_url: str) -> bool:
                 output_video_path=current.output_video_path,
                 clip_count=current.clip_count,
                 clip_preview_urls=current.clip_preview_urls,
+                clip_image_sources=current.clip_image_sources,
+                image_source_report=current.image_source_report,
             )
         )
     return True

@@ -351,4 +351,20 @@ Object.assign(zhCN.toast, {
   finalVideoDeleteFailed: '删除成片失败：{error}'
 })
 
+Object.assign(zhCN.hint, {
+  imageSourceBadgeCache: '缓存',
+  imageSourceBadgeGenerated: '新生成',
+  imageSourceBadgeReference: '人设图',
+  imageSourceBadgeOther: '其他',
+  imageSourceTagCache: '缓存命中',
+  imageSourceTagGenerated: '新生成',
+  imageSourceTagFallbackLlm: 'LLM兜底缓存',
+  imageSourceTagFallbackCache: '兜底缓存',
+  imageSourceTagFallbackCharacterCache: '角色缓存兜底',
+  imageSourceTagFallbackSceneOnlyCache: '场景缓存兜底',
+  imageSourceTagFallbackReference: '人设图兜底',
+  imageSourceTagFallbackRandomCache: '随机缓存兜底',
+  imageSourceTagOther: '其他来源'
+})
+
 export default zhCN

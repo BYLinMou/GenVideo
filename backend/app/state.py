@@ -62,6 +62,7 @@ class JobStore:
                         output_video_path TEXT,
                         clip_count INTEGER NOT NULL DEFAULT 0,
                         clip_preview_urls_json TEXT NOT NULL DEFAULT '[]',
+                        clip_image_sources_json TEXT NOT NULL DEFAULT '[]',
                         image_source_report_json TEXT,
                         created_at TEXT NOT NULL,
                         updated_at TEXT NOT NULL
@@ -69,6 +70,7 @@ class JobStore:
                     """
                 )
                 self._ensure_jobs_column(conn, "image_source_report_json", "TEXT")
+                self._ensure_jobs_column(conn, "clip_image_sources_json", "TEXT NOT NULL DEFAULT '[]'")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)")
                 conn.execute(
                     """
@@ -98,6 +100,16 @@ class JobStore:
     def _row_to_status(self, row: sqlite3.Row) -> JobStatus:
         clip_count = max(0, int(row["clip_count"] or 0))
         previews = self._build_preview_urls(str(row["job_id"]), clip_count)
+        clip_image_sources: list[str] = []
+        raw_clip_sources = row["clip_image_sources_json"] if "clip_image_sources_json" in row.keys() else None
+        if raw_clip_sources:
+            try:
+                parsed = json.loads(str(raw_clip_sources))
+                if isinstance(parsed, list):
+                    clip_image_sources = [str(item or "") for item in parsed]
+            except Exception:
+                clip_image_sources = []
+
         image_source_report: dict[str, object] | None = None
         raw_report = row["image_source_report_json"] if "image_source_report_json" in row.keys() else None
         if raw_report:
@@ -119,6 +131,7 @@ class JobStore:
             output_video_path=str(row["output_video_path"]) if row["output_video_path"] else None,
             clip_count=clip_count,
             clip_preview_urls=previews,
+            clip_image_sources=clip_image_sources,
             image_source_report=image_source_report,
             created_at=str(row["created_at"]) if "created_at" in row.keys() and row["created_at"] else None,
             updated_at=str(row["updated_at"]) if "updated_at" in row.keys() and row["updated_at"] else None,
@@ -134,9 +147,9 @@ class JobStore:
                         job_id, status, progress, step, message,
                         current_segment, total_segments,
                         output_video_url, output_video_path,
-                        clip_count, clip_preview_urls_json, image_source_report_json,
+                        clip_count, clip_preview_urls_json, clip_image_sources_json, image_source_report_json,
                         created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(job_id) DO UPDATE SET
                         status=excluded.status,
                         progress=excluded.progress,
@@ -148,6 +161,7 @@ class JobStore:
                         output_video_path=excluded.output_video_path,
                         clip_count=excluded.clip_count,
                         clip_preview_urls_json=excluded.clip_preview_urls_json,
+                        clip_image_sources_json=excluded.clip_image_sources_json,
                         image_source_report_json=excluded.image_source_report_json,
                         updated_at=excluded.updated_at
                     """,
@@ -163,6 +177,7 @@ class JobStore:
                         status.output_video_path,
                         max(0, int(status.clip_count or 0)),
                         "[]",
+                        json.dumps(status.clip_image_sources, ensure_ascii=False) if status.clip_image_sources else "[]",
                         json.dumps(status.image_source_report, ensure_ascii=False) if status.image_source_report else None,
                         now,
                         now,
@@ -179,7 +194,7 @@ class JobStore:
                         job_id, status, progress, step, message,
                         current_segment, total_segments,
                         output_video_url, output_video_path,
-                        clip_count, clip_preview_urls_json, image_source_report_json,
+                        clip_count, clip_preview_urls_json, clip_image_sources_json, image_source_report_json,
                         created_at, updated_at
                     FROM jobs
                     WHERE job_id = ?
@@ -200,7 +215,7 @@ class JobStore:
                         job_id, status, progress, step, message,
                         current_segment, total_segments,
                         output_video_url, output_video_path,
-                        clip_count, clip_preview_urls_json, image_source_report_json,
+                        clip_count, clip_preview_urls_json, clip_image_sources_json, image_source_report_json,
                         created_at, updated_at
                     FROM jobs
                     ORDER BY created_at DESC, updated_at DESC
