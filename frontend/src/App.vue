@@ -1,5 +1,5 @@
 ﻿<script setup>
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 import { WORKSPACE_AUTH_REQUIRED_EVENT, api } from './api'
@@ -62,6 +62,68 @@ const form = reactive({
 
 const characters = ref([])
 const confidence = ref(0)
+
+function normalizeCharacterIdentityFlags(source, options = {}) {
+  const { ensureOneMain = false } = options
+  const list = Array.isArray(source) ? source : []
+
+  const mainIndexes = []
+  const selfIndexes = []
+  list.forEach((item, index) => {
+    if (!item || typeof item !== 'object') return
+    item.is_main_character = Boolean(item.is_main_character)
+    item.is_story_self = Boolean(item.is_story_self)
+    if (item.is_main_character) mainIndexes.push(index)
+    if (item.is_story_self) selfIndexes.push(index)
+  })
+
+  if (mainIndexes.length > 1) {
+    const keep = mainIndexes[0]
+    mainIndexes.slice(1).forEach((index) => {
+      list[index].is_main_character = false
+    })
+    mainIndexes.length = 0
+    mainIndexes.push(keep)
+  }
+
+  if (selfIndexes.length > 1) {
+    const keep = selfIndexes[0]
+    selfIndexes.slice(1).forEach((index) => {
+      list[index].is_story_self = false
+    })
+  }
+
+  if (ensureOneMain && !mainIndexes.length && list.length) {
+    const bestIndex = list.reduce((best, item, index) => {
+      const score = Number(item?.importance || 0)
+      return score > Number(list[best]?.importance || 0) ? index : best
+    }, 0)
+    list[bestIndex].is_main_character = true
+  }
+
+  return list
+}
+
+function setMainCharacter(index, value) {
+  const enabled = Boolean(value)
+  if (!enabled) {
+    const target = characters.value[index]
+    if (target && target.is_main_character) {
+      target.is_main_character = true
+    }
+    return
+  }
+  characters.value.forEach((item, itemIndex) => {
+    item.is_main_character = enabled && itemIndex === index
+  })
+}
+
+function setStorySelf(index, value) {
+  const enabled = Boolean(value)
+  characters.value.forEach((item, itemIndex) => {
+    item.is_story_self = enabled && itemIndex === index
+  })
+}
 
 const segmentPreview = reactive({
   total_segments: 0,
@@ -130,9 +192,43 @@ const bgmStatus = reactive({
 
 const JOB_IDS_STORAGE_KEY = 'genvideo_job_ids_v1'
 const ACTIVE_JOB_ID_STORAGE_KEY = 'genvideo_active_job_id_v1'
+const WORKSPACE_DRAFT_STORAGE_KEY = 'genvideo_workspace_draft_v1'
+
+const WORKSPACE_DRAFT_FORM_NUMBER_FIELDS = [
+  'sentences_per_segment',
+  'max_segment_groups',
+  'fps',
+  'bgm_volume',
+  'watermark_opacity',
+  'scene_reuse_no_repeat_window'
+]
+
+const WORKSPACE_DRAFT_FORM_BOOLEAN_FIELDS = [
+  'bgm_enabled',
+  'watermark_enabled',
+  'enable_scene_image_reuse'
+]
+
+const WORKSPACE_DRAFT_FORM_STRING_FIELDS = [
+  'text',
+  'analysis_depth',
+  'segment_method',
+  'segment_groups_range',
+  'resolution',
+  'image_aspect_ratio',
+  'subtitle_style',
+  'camera_motion',
+  'render_mode',
+  'novel_alias',
+  'watermark_type',
+  'watermark_text',
+  'watermark_image_path'
+]
 
 let pollingTimer = null
 let pollingBusy = false
+let workspaceDraftPersistTimer = null
+let restoringWorkspaceDraft = false
 
 const jobs = ref([])
 const activeJobId = ref('')
@@ -140,6 +236,8 @@ const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
 const clipVideoEnabled = reactive({})
 const finalVideoEnabled = reactive({})
+const JOB_LIST_PAGE_SIZE = 5
+const jobListPage = ref(1)
 
 const sortedJobs = computed(() => {
   return [...jobs.value].sort((a, b) => {
@@ -148,6 +246,34 @@ const sortedJobs = computed(() => {
     return String(a.id || '').localeCompare(String(b.id || ''))
   })
 })
+
+const jobListTotalPages = computed(() => {
+  if (!sortedJobs.value.length) return 1
+  return Math.max(1, Math.ceil(sortedJobs.value.length / JOB_LIST_PAGE_SIZE))
+})
+
+const pagedJobs = computed(() => {
+  const start = (Math.max(1, Number(jobListPage.value || 1)) - 1) * JOB_LIST_PAGE_SIZE
+  return sortedJobs.value.slice(start, start + JOB_LIST_PAGE_SIZE)
+})
+
+function clampJobListPage() {
+  const maxPage = jobListTotalPages.value
+  if (jobListPage.value > maxPage) {
+    jobListPage.value = maxPage
+  }
+  if (jobListPage.value < 1) {
+    jobListPage.value = 1
+  }
+}
+
+function setJobListPageForJob(jobId) {
+  const id = String(jobId || '').trim()
+  if (!id) return
+  const index = sortedJobs.value.findIndex((item) => String(item.id || '') === id)
+  if (index < 0) return
+  jobListPage.value = Math.floor(index / JOB_LIST_PAGE_SIZE) + 1
+}
 
 const effectiveSegmentGroups = computed(() => {
   if (!segmentPreview.total_segments) return 0
@@ -281,6 +407,146 @@ function getCharacterKey(character, index) {
 function isGeneratingRef(character, index) {
   const key = getCharacterKey(character, index)
   return !!generatingRef[key]
+}
+
+function normalizeDraftCharacter(item) {
+  if (!item || typeof item !== 'object') return null
+  const importance = Number(item.importance || 5)
+  return {
+    name: String(item.name || '').trim(),
+    role: String(item.role || 'supporting').trim() || 'supporting',
+    importance: Math.max(1, Math.min(10, Number.isFinite(importance) ? importance : 5)),
+    is_main_character: Boolean(item.is_main_character),
+    is_story_self: Boolean(item.is_story_self),
+    appearance: String(item.appearance || '').trim(),
+    personality: String(item.personality || '').trim(),
+    voice_id: String(item.voice_id || voices.value[0]?.id || 'zh-CN-YunxiNeural'),
+    base_prompt: String(item.base_prompt || '').trim(),
+    reference_image_path: String(item.reference_image_path || ''),
+    reference_image_url: String(item.reference_image_url || '')
+  }
+}
+
+function buildWorkspaceDraftPayload() {
+  const formSnapshot = {}
+  for (const field of WORKSPACE_DRAFT_FORM_NUMBER_FIELDS) {
+    formSnapshot[field] = Number(form[field] ?? 0)
+  }
+  for (const field of WORKSPACE_DRAFT_FORM_BOOLEAN_FIELDS) {
+    formSnapshot[field] = Boolean(form[field])
+  }
+  for (const field of WORKSPACE_DRAFT_FORM_STRING_FIELDS) {
+    formSnapshot[field] = String(form[field] ?? '')
+  }
+
+  return {
+    selectedModel: String(selectedModel.value || ''),
+    confidence: Number(confidence.value || 0),
+    form: formSnapshot,
+    characters: (characters.value || []).map((item) => normalizeDraftCharacter(item)).filter(Boolean),
+    nameReplace: {
+      enabled: Boolean(nameReplace.enabled),
+      maxCandidates: Math.max(1, Number(nameReplace.maxCandidates || 24))
+    },
+    replacementEntries: (replacementEntries.value || []).map((item) => ({
+      word: String(item?.word || ''),
+      count: Math.max(0, Number(item?.count || 0)),
+      enabled: Boolean(item?.enabled),
+      replacement: String(item?.replacement || '')
+    })),
+    novelAliases: (novelAliases.value || []).map((item) => String(item || '')).filter(Boolean),
+    customAliasInput: String(customAliasInput.value || ''),
+    savedAt: Date.now()
+  }
+}
+
+function persistWorkspaceDraft() {
+  if (typeof window === 'undefined') return
+  try {
+    const payload = buildWorkspaceDraftPayload()
+    window.localStorage.setItem(WORKSPACE_DRAFT_STORAGE_KEY, JSON.stringify(payload))
+  } catch (error) {
+    console.warn('[workspace] persist draft failed:', error)
+  }
+}
+
+function schedulePersistWorkspaceDraft() {
+  if (typeof window === 'undefined') return
+  if (restoringWorkspaceDraft) return
+  if (workspaceDraftPersistTimer) {
+    clearTimeout(workspaceDraftPersistTimer)
+  }
+  workspaceDraftPersistTimer = setTimeout(() => {
+    workspaceDraftPersistTimer = null
+    persistWorkspaceDraft()
+  }, 600)
+}
+
+function restoreWorkspaceDraft() {
+  if (typeof window === 'undefined') return
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_DRAFT_STORAGE_KEY)
+    if (!raw) return
+    const parsed = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object') return
+
+    restoringWorkspaceDraft = true
+
+    const savedModel = String(parsed.selectedModel || '').trim()
+    if (savedModel) {
+      selectedModel.value = savedModel
+    }
+
+    const savedForm = parsed.form && typeof parsed.form === 'object' ? parsed.form : {}
+    for (const field of WORKSPACE_DRAFT_FORM_NUMBER_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(savedForm, field)) continue
+      const value = Number(savedForm[field])
+      if (Number.isFinite(value)) {
+        form[field] = value
+      }
+    }
+    for (const field of WORKSPACE_DRAFT_FORM_BOOLEAN_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(savedForm, field)) continue
+      form[field] = Boolean(savedForm[field])
+    }
+    for (const field of WORKSPACE_DRAFT_FORM_STRING_FIELDS) {
+      if (!Object.prototype.hasOwnProperty.call(savedForm, field)) continue
+      form[field] = String(savedForm[field] ?? '')
+    }
+
+    const savedCharacters = Array.isArray(parsed.characters)
+      ? parsed.characters.map((item) => normalizeDraftCharacter(item)).filter(Boolean)
+      : []
+    if (savedCharacters.length) {
+      characters.value = normalizeCharacterIdentityFlags(savedCharacters, { ensureOneMain: true })
+    }
+
+    const savedConfidence = Number(parsed.confidence)
+    confidence.value = Number.isFinite(savedConfidence) ? savedConfidence : 0
+
+    const savedNameReplace = parsed.nameReplace && typeof parsed.nameReplace === 'object' ? parsed.nameReplace : {}
+    nameReplace.enabled = Boolean(savedNameReplace.enabled)
+    const maxCandidates = Number(savedNameReplace.maxCandidates)
+    nameReplace.maxCandidates = Number.isFinite(maxCandidates) ? Math.max(1, maxCandidates) : 24
+
+    replacementEntries.value = Array.isArray(parsed.replacementEntries)
+      ? parsed.replacementEntries.map((item) => ({
+          word: String(item?.word || ''),
+          count: Math.max(0, Number(item?.count || 0)),
+          enabled: Boolean(item?.enabled),
+          replacement: String(item?.replacement || '')
+        }))
+      : []
+
+    novelAliases.value = Array.isArray(parsed.novelAliases)
+      ? parsed.novelAliases.map((item) => String(item || '')).filter(Boolean)
+      : []
+    customAliasInput.value = String(parsed.customAliasInput || '')
+  } catch (error) {
+    console.warn('[workspace] restore draft failed:', error)
+  } finally {
+    restoringWorkspaceDraft = false
+  }
 }
 
 const nameReplace = reactive({
@@ -649,8 +915,10 @@ function removeJobRecord(jobId) {
   const id = String(jobId || '')
   if (!id) return
   jobs.value = jobs.value.filter((item) => item.id !== id)
+  clampJobListPage()
   if (activeJobId.value === id) {
-    activeJobId.value = jobs.value[0]?.id || ''
+    activeJobId.value = sortedJobs.value[0]?.id || ''
+    setJobListPageForJob(activeJobId.value)
     const next = jobs.value.find((item) => item.id === activeJobId.value)
     if (next) {
       syncJobViewFromRecord(next)
@@ -849,6 +1117,7 @@ async function bootstrapWorkspaceData() {
     return
   }
   restoreJobSnapshot()
+  restoreWorkspaceDraft()
   await Promise.all([loadModels(), loadVoices(), loadRefImages()])
   await loadBgmLibrary()
   await loadBgmStatus()
@@ -975,6 +1244,7 @@ function selectJob(jobId) {
   if (!id) return
   resetClipVideoEnabledForJob(id)
   activeJobId.value = id
+  setJobListPageForJob(id)
   const found = jobs.value.find((item) => item.id === id)
   if (found) {
     syncJobViewFromRecord(found)
@@ -1102,8 +1372,9 @@ function restoreJobSnapshot() {
     if (savedActive && jobs.value.some((item) => item.id === savedActive)) {
       activeJobId.value = savedActive
     } else {
-      activeJobId.value = jobs.value[0]?.id || ''
+      activeJobId.value = sortedJobs.value[0]?.id || ''
     }
+    setJobListPageForJob(activeJobId.value)
 
     if (activeJobId.value) {
       const record = jobs.value.find((item) => item.id === activeJobId.value)
@@ -1112,6 +1383,7 @@ function restoreJobSnapshot() {
   } catch {
     jobs.value = []
     activeJobId.value = ''
+    jobListPage.value = 1
   }
 }
 
@@ -1156,6 +1428,13 @@ function resolveRefImageUrl(image) {
   }
 }
 
+function withImageCacheBust(url) {
+  const text = String(url || '').trim()
+  if (!text) return ''
+  const separator = text.includes('?') ? '&' : '?'
+  return `${text}${separator}t=${Date.now()}`
+}
+
 function pickRefImage(image) {
   const target = characters.value[refPicker.characterIndex]
   if (!target) return
@@ -1175,7 +1454,8 @@ async function loadModels() {
     const data = await api.getModels()
     models.value = data.models || []
     const preferred = models.value.find((item) => item.id === 'gpt-oss-120b' && item.available)
-    selectedModel.value = preferred?.id || models.value.find((item) => item.available)?.id || models.value[0]?.id || ''
+    const restored = models.value.find((item) => item.id === selectedModel.value && item.available)
+    selectedModel.value = restored?.id || preferred?.id || models.value.find((item) => item.available)?.id || models.value[0]?.id || ''
   } catch (error) {
     ElMessage.error(t('toast.modelsLoadFailed', { error: error.message }))
   } finally {
@@ -1232,12 +1512,15 @@ async function runAnalyze() {
       analysis_depth: form.analysis_depth,
       model_id: selectedModel.value || null
     })
-    characters.value = (data.characters || []).map((item) => ({
+    const normalizedCharacters = (data.characters || []).map((item) => ({
       ...item,
+      is_main_character: Boolean(item?.is_main_character),
+      is_story_self: Boolean(item?.is_story_self),
       reference_image_path: item.reference_image_path || '',
       reference_image_url: item.reference_image_url || '',
       voice_id: item.voice_id || voices.value[0]?.id || 'zh-CN-YunxiNeural'
     }))
+    characters.value = normalizeCharacterIdentityFlags(normalizedCharacters, { ensureOneMain: true })
     confidence.value = Number(data.confidence || 0)
     ElMessage.success(t('toast.analyzeSuccess'))
   } catch (error) {
@@ -1493,7 +1776,7 @@ async function uploadRefImage(event, character) {
   try {
     const created = await api.uploadCharacterRefImage(file)
     character.reference_image_path = created.path
-    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
+    character.reference_image_url = withImageCacheBust(created.url || api.getCharacterRefImageUrl(created.path))
     await loadRefImages()
     ElMessage.success(t('toast.uploadSuccess'))
   } catch (error) {
@@ -1536,7 +1819,7 @@ async function generateRefImage(character, index) {
       resolution: '768x768'
     })
     character.reference_image_path = created.path
-    character.reference_image_url = created.url || api.getCharacterRefImageUrl(created.path)
+    character.reference_image_url = withImageCacheBust(created.url || api.getCharacterRefImageUrl(created.path))
     await loadRefImages()
     ElMessage.success(t('toast.refGenerated'))
   } catch (error) {
@@ -1786,8 +2069,73 @@ onMounted(async () => {
   }
 })
 
+watch(
+  sortedJobs,
+  () => {
+    clampJobListPage()
+  },
+  { deep: false }
+)
+
+watch(
+  form,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(
+  characters,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(selectedModel, () => {
+  schedulePersistWorkspaceDraft()
+})
+
+watch(confidence, () => {
+  schedulePersistWorkspaceDraft()
+})
+
+watch(
+  nameReplace,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(
+  replacementEntries,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(
+  novelAliases,
+  () => {
+    schedulePersistWorkspaceDraft()
+  },
+  { deep: true }
+)
+
+watch(customAliasInput, () => {
+  schedulePersistWorkspaceDraft()
+})
+
 onUnmounted(() => {
   stopPolling()
+  if (workspaceDraftPersistTimer) {
+    clearTimeout(workspaceDraftPersistTimer)
+    workspaceDraftPersistTimer = null
+  }
+  persistWorkspaceDraft()
   if (typeof window !== 'undefined') {
     window.removeEventListener('popstate', handleLocationChange)
     window.removeEventListener(WORKSPACE_AUTH_REQUIRED_EVENT, handleWorkspaceAuthRequired)
@@ -2152,6 +2500,22 @@ onUnmounted(() => {
           </div>
 
           <div>
+            <label>{{ t('field.mainCharacter') }}</label>
+            <el-switch
+              :model-value="!!character.is_main_character"
+              @change="(value) => setMainCharacter(index, value)"
+            />
+          </div>
+
+          <div>
+            <label>{{ t('field.storySelf') }}</label>
+            <el-switch
+              :model-value="!!character.is_story_self"
+              @change="(value) => setStorySelf(index, value)"
+            />
+          </div>
+
+          <div>
             <label>{{ t('field.voice') }}</label>
             <el-select v-model="character.voice_id" style="width: 100%">
               <el-option v-for="voice in voices" :key="voice.id" :label="`${voice.name} (${voice.id})`" :value="voice.id" />
@@ -2223,7 +2587,7 @@ onUnmounted(() => {
       <h2>{{ t('section.render') }}</h2>
       <div v-if="sortedJobs.length" class="job-list">
         <div
-          v-for="item in sortedJobs"
+          v-for="item in pagedJobs"
           :key="item.id"
           class="job-list-item"
           :class="{ active: item.id === activeJobId }"
@@ -2241,6 +2605,16 @@ onUnmounted(() => {
           </div>
           <el-button size="small" type="danger" plain @click.stop="removeJob(item.id)">{{ t('action.remove') }}</el-button>
         </div>
+      </div>
+
+      <div v-if="sortedJobs.length" class="job-pagination">
+        <el-pagination
+          v-model:current-page="jobListPage"
+          :page-size="JOB_LIST_PAGE_SIZE"
+          :total="sortedJobs.length"
+          layout="prev, pager, next"
+          background
+        />
       </div>
 
       <div class="actions">

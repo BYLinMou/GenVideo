@@ -407,9 +407,26 @@ def _parse_resolution(value: str) -> tuple[int, int]:
         return 1080, 1920
 
 
-def _pick_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion:
-    if not characters:
-        return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
+_SPEECH_VERBS = (
+    "说",
+    "说道",
+    "道",
+    "问",
+    "回答",
+    "答",
+    "喊",
+    "叫",
+    "嘀咕",
+    "喃喃",
+    "开口",
+    "提醒",
+    "反问",
+    "怒喝",
+    "笑道",
+)
+
+
+def _mentions_in_text(characters: list[CharacterSuggestion], text: str) -> list[tuple[int, int, CharacterSuggestion]]:
     content = text or ""
     hits: list[tuple[int, int, CharacterSuggestion]] = []
     for item in characters:
@@ -419,20 +436,197 @@ def _pick_character(characters: list[CharacterSuggestion], text: str) -> Charact
         pos = content.find(name)
         if pos >= 0:
             hits.append((pos, -int(item.importance or 0), item))
+    hits.sort(key=lambda row: (row[0], row[1]))
+    return hits
+
+
+def _detect_speaker_character(characters: list[CharacterSuggestion], text: str) -> CharacterSuggestion | None:
+    content = text or ""
+    if not content:
+        return None
+
+    best: tuple[int, int, CharacterSuggestion] | None = None
+    for item in characters:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        escaped = re.escape(name)
+        patterns = [
+            rf"{escaped}\s*(?:[，,：: ]\s*)?(?:{'|'.join(_SPEECH_VERBS)})",
+            rf"(?:{'|'.join(_SPEECH_VERBS)})\s*(?:[，,：: ]\s*)?{escaped}",
+            rf"{escaped}\s*[：:]",
+        ]
+        for pattern in patterns:
+            matched = re.search(pattern, content)
+            if not matched:
+                continue
+            candidate = (matched.start(), -int(item.importance or 0), item)
+            if best is None or candidate < best:
+                best = candidate
+            break
+
+    return best[2] if best else None
+
+
+def _contains_first_person_pronoun(text: str) -> bool:
+    content = str(text or "")
+    if not content:
+        return False
+    narration_only = _strip_quoted_dialogue(content)
+    if not narration_only:
+        return False
+
+    if any(token in narration_only for token in ("我", "我们", "咱", "咱们")):
+        return True
+
+    lowered = narration_only.lower()
+    return bool(re.search(r"\b(i|i'm|i’ve|i'd|me|my|mine|we|our|ours)\b", lowered))
+
+
+def _strip_quoted_dialogue(text: str) -> str:
+    content = str(text or "")
+    if not content:
+        return ""
+
+    quotes = _extract_quote_blocks(content)
+    if not quotes:
+        return content
+
+    slices: list[str] = []
+    cursor = 0
+    for _, start, end in quotes:
+        if start > cursor:
+            slices.append(content[cursor:start])
+        cursor = max(cursor, end + 1)
+
+    if cursor < len(content):
+        slices.append(content[cursor:])
+
+    return " ".join(part.strip() for part in slices if part and part.strip())
+
+
+def _pick_story_self_character(characters: list[CharacterSuggestion]) -> CharacterSuggestion | None:
+    marked = [item for item in characters if bool(getattr(item, "is_story_self", False))]
+    if marked:
+        marked.sort(key=lambda item: int(item.importance or 0), reverse=True)
+        return marked[0]
+
+    mains = [item for item in characters if bool(getattr(item, "is_main_character", False))]
+    if mains:
+        mains.sort(key=lambda item: int(item.importance or 0), reverse=True)
+        return mains[0]
+    return None
+
+
+def _normalize_runtime_identity_flags(characters: list[CharacterSuggestion]) -> list[CharacterSuggestion]:
+    if not characters:
+        return characters
+
+    main_indexes = [index for index, item in enumerate(characters) if bool(item.is_main_character)]
+    self_indexes = [index for index, item in enumerate(characters) if bool(item.is_story_self)]
+
+    if len(main_indexes) > 1:
+        keep = main_indexes[0]
+        for index in main_indexes[1:]:
+            characters[index].is_main_character = False
+        main_indexes = [keep]
+
+    if len(self_indexes) > 1:
+        keep = self_indexes[0]
+        for index in self_indexes[1:]:
+            characters[index].is_story_self = False
+        self_indexes = [keep]
+
+    if not main_indexes:
+        best_index = max(range(len(characters)), key=lambda idx: int(characters[idx].importance or 0))
+        characters[best_index].is_main_character = True
+
+    return characters
+
+
+def _pick_character(
+    characters: list[CharacterSuggestion],
+    text: str,
+    previous_character: CharacterSuggestion | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+) -> CharacterSuggestion:
+    if not characters:
+        return CharacterSuggestion(name="narrator", role="narrator", voice_id="zh-CN-YunxiNeural")
+
+    current_text = text or ""
+    hits = _mentions_in_text(characters, current_text)
     if hits:
-        hits.sort(key=lambda item: (item[0], item[1]))
         return hits[0][2]
+
+    speaker = _detect_speaker_character(characters, current_text)
+    if speaker is not None:
+        return speaker
+
+    if _contains_first_person_pronoun(current_text):
+        self_character = _pick_story_self_character(characters)
+        if self_character is not None:
+            return self_character
+
+    has_dialogue = any(mark in current_text for mark in _DIALOG_QUOTE_PAIRS.keys())
+    if has_dialogue and previous_segment_text:
+        previous_speaker = _detect_speaker_character(characters, previous_segment_text)
+        if previous_speaker is not None:
+            return previous_speaker
+
+    weighted_scores: dict[int, tuple[float, CharacterSuggestion]] = {}
+    for item in characters:
+        marker = id(item)
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        score = 0.0
+        score += float(current_text.count(name)) * 6.0
+        score += float((previous_segment_text or "").count(name)) * 2.5
+        score += float((next_segment_text or "").count(name)) * 1.5
+        score += float(int(item.importance or 0)) * 0.08
+        if previous_character is item and has_dialogue:
+            score += 1.25
+        weighted_scores[marker] = (score, item)
+
+    ranked = sorted(weighted_scores.values(), key=lambda row: row[0], reverse=True)
+    if ranked and ranked[0][0] > 0:
+        return ranked[0][1]
+
+    if previous_character is not None:
+        return previous_character
     return characters[0]
 
 
-def _pick_related_characters(characters: list[CharacterSuggestion], text: str, primary: CharacterSuggestion) -> list[CharacterSuggestion]:
+def _pick_related_characters(
+    characters: list[CharacterSuggestion],
+    text: str,
+    primary: CharacterSuggestion,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+) -> list[CharacterSuggestion]:
     if not characters:
         return []
-    normalized = (text or "").strip()
+
+    normalized_current = (text or "").strip()
+    normalized_previous = (previous_segment_text or "").strip()
+    normalized_next = (next_segment_text or "").strip()
     selected: list[CharacterSuggestion] = []
 
+    current_hits = _mentions_in_text(characters, normalized_current)
+    for _, _, item in current_hits:
+        selected.append(item)
+
+    if _contains_first_person_pronoun(normalized_current):
+        self_character = _pick_story_self_character(characters)
+        if self_character is not None:
+            selected.append(self_character)
+
     for item in characters:
-        if item.name and item.name in normalized:
+        name = (item.name or "").strip()
+        if not name:
+            continue
+        if name in normalized_previous or name in normalized_next:
             selected.append(item)
 
     if primary not in selected:
@@ -447,6 +641,69 @@ def _pick_related_characters(characters: list[CharacterSuggestion], text: str, p
         seen.add(marker)
         dedup.append(item)
     return dedup
+
+
+def _pick_characters_by_indexes(
+    characters: list[CharacterSuggestion],
+    primary_index: int | None,
+    related_indexes: list[int],
+) -> tuple[CharacterSuggestion | None, list[CharacterSuggestion]]:
+    if not characters:
+        return None, []
+
+    safe_primary = primary_index if isinstance(primary_index, int) and 0 <= primary_index < len(characters) else None
+    selected: list[CharacterSuggestion] = []
+    seen: set[int] = set()
+
+    if safe_primary is not None:
+        selected.append(characters[safe_primary])
+        seen.add(safe_primary)
+
+    for raw in related_indexes:
+        if not isinstance(raw, int):
+            continue
+        if raw < 0 or raw >= len(characters):
+            continue
+        if raw in seen:
+            continue
+        selected.append(characters[raw])
+        seen.add(raw)
+
+    primary_character = characters[safe_primary] if safe_primary is not None else None
+    return primary_character, selected
+
+
+def _coerce_character_index(value: object, size: int) -> int | None:
+    if size <= 0:
+        return None
+    try:
+        index = int(value)
+    except Exception:
+        return None
+    if 0 <= index < size:
+        return index
+    return None
+
+
+def _coerce_character_indexes(values: object, size: int, limit: int = 4) -> list[int]:
+    if isinstance(values, list):
+        raw_items = values
+    elif values is None:
+        raw_items = []
+    else:
+        raw_items = [values]
+
+    output: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_items:
+        index = _coerce_character_index(raw, size)
+        if index is None or index in seen:
+            continue
+        seen.add(index)
+        output.append(index)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
 
 
 def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 2) -> list[str]:
@@ -467,6 +724,97 @@ def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int =
         if len(output) >= max(1, int(limit)):
             break
     return output
+
+
+def _normalize_character_name_key(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "")).strip().lower()
+
+
+def _normalize_path_key(value: str) -> str:
+    return str(value or "").replace("\\", "/").strip().lower()
+
+
+def _extract_entry_character_profile(entry: dict) -> tuple[str, set[str]]:
+    match_profile = entry.get("match_profile") if isinstance(entry.get("match_profile"), dict) else {}
+    descriptor = entry.get("descriptor") if isinstance(entry.get("descriptor"), dict) else {}
+
+    character_name = _normalize_character_name_key(
+        str(match_profile.get("character_name") or descriptor.get("character_name") or "")
+    )
+
+    reference_paths: set[str] = set()
+    for source in (match_profile, descriptor):
+        paths = source.get("reference_image_paths") if isinstance(source, dict) else []
+        if isinstance(paths, list):
+            for raw in paths:
+                key = _normalize_path_key(str(raw or ""))
+                if key:
+                    reference_paths.add(key)
+        single = _normalize_path_key(str((source.get("reference_image_path") if isinstance(source, dict) else "") or ""))
+        if single:
+            reference_paths.add(single)
+
+    return character_name, reference_paths
+
+
+def _pick_random_current_character_cache_entry(
+    character: CharacterSuggestion,
+    disallow_entry_ids: set[str] | None = None,
+) -> dict | None:
+    candidates = list_scene_cache_entries(disallow_entry_ids)
+    if not candidates:
+        return None
+
+    target_name = _normalize_character_name_key(character.name or "")
+    target_ref_path = _normalize_path_key(character.reference_image_path or "")
+
+    matched: list[dict] = []
+    for item in candidates:
+        image_path = Path(str(item.get("image_path") or ""))
+        if not image_path.exists():
+            continue
+        entry_name, entry_ref_paths = _extract_entry_character_profile(item)
+        name_match = bool(target_name) and entry_name == target_name
+        ref_match = bool(target_ref_path) and target_ref_path in entry_ref_paths
+        if name_match or ref_match:
+            matched.append(item)
+
+    if not matched:
+        return None
+    return random.choice(matched)
+
+
+def _entry_is_scene_only(entry: dict) -> bool:
+    match_profile = entry.get("match_profile") if isinstance(entry.get("match_profile"), dict) else {}
+    descriptor = entry.get("descriptor") if isinstance(entry.get("descriptor"), dict) else {}
+
+    raw = match_profile.get("is_scene_only", descriptor.get("is_scene_only", False))
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, (int, float)):
+        return bool(raw)
+    text = str(raw or "").strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _pick_random_scene_only_cache_entry(
+    disallow_entry_ids: set[str] | None = None,
+) -> dict | None:
+    candidates = list_scene_cache_entries(disallow_entry_ids)
+    if not candidates:
+        return None
+
+    matched: list[dict] = []
+    for item in candidates:
+        image_path = Path(str(item.get("image_path") or ""))
+        if not image_path.exists():
+            continue
+        if _entry_is_scene_only(item):
+            matched.append(item)
+
+    if not matched:
+        return None
+    return random.choice(matched)
 
 
 def _sanitize_character_voices(characters: list[CharacterSuggestion], narrator_voice: str = _NARRATOR_VOICE_ID) -> list[CharacterSuggestion]:
@@ -1319,6 +1667,8 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
         normalized.get("cache", 0)
         + normalized.get("fallback_llm", 0)
         + normalized.get("fallback_cache", 0)
+        + normalized.get("fallback_character_cache", 0)
+        + normalized.get("fallback_scene_only_cache", 0)
         + normalized.get("fallback_random_cache", 0)
     )
     generated_images = normalized.get("generated", 0)
@@ -1342,6 +1692,34 @@ def _build_image_source_report(source_counts: dict[str, int]) -> dict[str, objec
     }
 
 
+def _extract_source_counts_from_report(report: dict[str, object] | None) -> dict[str, int]:
+    if not isinstance(report, dict):
+        return {}
+    raw_counts = report.get("source_counts")
+    if not isinstance(raw_counts, dict):
+        return {}
+    output: dict[str, int] = {}
+    for key, value in raw_counts.items():
+        try:
+            output[str(key)] = max(0, int(value or 0))
+        except Exception:
+            continue
+    return output
+
+
+def _restore_image_source_counts(job_id: str, source_counts: dict[str, int]) -> dict[str, int]:
+    current = job_store.get(job_id)
+    if not current:
+        return source_counts
+    persisted = _extract_source_counts_from_report(current.image_source_report)
+    if not persisted:
+        return source_counts
+    merged = dict(source_counts)
+    for key, value in persisted.items():
+        merged[str(key)] = max(0, int(value or 0))
+    return merged
+
+
 def _update_job(
     job_id: str,
     base_url: str,
@@ -1355,7 +1733,11 @@ def _update_job(
     clip_count: int | None = None,
     image_source_report: dict[str, object] | None = None,
 ) -> None:
-    resolved_clip_count = max(0, int(clip_count or 0))
+    current = job_store.get(job_id)
+    resolved_clip_count = max(0, int(clip_count if clip_count is not None else (current.clip_count if current else 0)))
+    resolved_image_source_report = image_source_report
+    if resolved_image_source_report is None and current is not None:
+        resolved_image_source_report = current.image_source_report
     job_store.set(
         JobStatus(
             job_id=job_id,
@@ -1369,7 +1751,7 @@ def _update_job(
             output_video_path=output_video_path,
             clip_count=resolved_clip_count,
             clip_preview_urls=[],
-            image_source_report=image_source_report,
+            image_source_report=resolved_image_source_report,
         )
     )
 
@@ -1445,24 +1827,24 @@ async def _resolve_segment_image(
             )
             return reused, "fallback-llm", str(forced_llm_pick.get("entry_id") or "") or None
 
-        fallback_matched = await find_reusable_scene_image(
-            scene_descriptor=descriptor,
-            model_id=payload.model_id,
-            disallow_entry_ids=recent_reuse_entry_ids,
+        character_random_entry = await run_in_threadpool(
+            _pick_random_current_character_cache_entry,
+            character,
+            recent_reuse_entry_ids,
         )
-        if fallback_matched and fallback_matched.get("image_path"):
+        if character_random_entry and character_random_entry.get("image_path"):
             reused = await run_in_threadpool(
                 render_cached_image_to_output,
-                fallback_matched["image_path"],
+                character_random_entry["image_path"],
                 image_path,
                 resolution,
             )
-            logger.info(
-                "Scene fallback cache hit (%s): reason=%s",
-                fallback_matched.get("match_type"),
-                fallback_matched.get("reason") or "",
+            logger.warning(
+                "Scene fallback used random cache image for current character: entry_id=%s character=%s",
+                character_random_entry.get("id"),
+                character.name,
             )
-            return reused, "fallback-cache", str(fallback_matched.get("entry_id") or "") or None
+            return reused, "fallback-character-cache", str(character_random_entry.get("id") or "") or None
 
         ref_path = Path(character.reference_image_path or "") if character.reference_image_path else None
         if ref_path and ref_path.exists() and ref_path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -1474,6 +1856,20 @@ async def _resolve_segment_image(
             )
             logger.warning("Scene fallback used character reference image")
             return reused, "fallback-reference", None
+
+        scene_only_entry = await run_in_threadpool(
+            _pick_random_scene_only_cache_entry,
+            recent_reuse_entry_ids,
+        )
+        if scene_only_entry and scene_only_entry.get("image_path"):
+            reused = await run_in_threadpool(
+                render_cached_image_to_output,
+                scene_only_entry["image_path"],
+                image_path,
+                resolution,
+            )
+            logger.warning("Scene fallback used random scene-only cached image: entry_id=%s", scene_only_entry.get("id"))
+            return reused, "fallback-scene-only-cache", str(scene_only_entry.get("id") or "") or None
 
         candidates = await run_in_threadpool(list_scene_cache_entries, recent_reuse_entry_ids)
         if candidates:
@@ -1511,10 +1907,16 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         "generated": 0,
         "fallback_llm": 0,
         "fallback_cache": 0,
+        "fallback_character_cache": 0,
+        "fallback_scene_only_cache": 0,
         "fallback_reference": 0,
         "fallback_random_cache": 0,
         "other": 0,
     }
+    image_source_counts = _restore_image_source_counts(job_id, image_source_counts)
+    restored_image_count = sum(max(0, int(value or 0)) for value in image_source_counts.values())
+    if restored_image_count > 0:
+        logger.info("Restored persisted image source counts for job %s: total=%s", job_id, restored_image_count)
 
     if payload.enable_scene_image_reuse:
         ensure_scene_cache_paths()
@@ -1533,6 +1935,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
         resolution = _parse_resolution(payload.resolution)
         characters = _sanitize_character_voices(list(payload.characters), narrator_voice=_NARRATOR_VOICE_ID)
+        characters = _normalize_runtime_identity_flags(characters)
         story_world_context = await summarize_story_world_context(payload.text, payload.model_id)
         if story_world_context:
             logger.info("Story world context summary: %s", story_world_context)
@@ -1540,6 +1943,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
         no_repeat_window = max(0, int(payload.scene_reuse_no_repeat_window or 0))
         lookback_scenes = no_repeat_window
         recent_scene_entry_ids = deque(maxlen=lookback_scenes if lookback_scenes > 0 else None)
+        previous_primary_character: CharacterSuggestion | None = None
 
         for index, segment_text in enumerate(segments):
             if job_store.is_cancelled(job_id):
@@ -1572,8 +1976,38 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 clip_count=rendered_clip_count,
             )
 
-            character = _pick_character(characters, segment_text)
-            related_characters = _pick_related_characters(characters, segment_text, character)
+            previous_segment_text = segments[index - 1] if index > 0 else ""
+            next_segment_text = segments[index + 1] if index + 1 < total else ""
+
+            default_character = _pick_character(
+                characters,
+                segment_text,
+                previous_character=previous_primary_character,
+                previous_segment_text=previous_segment_text,
+                next_segment_text=next_segment_text,
+            )
+            default_related_characters = _pick_related_characters(
+                characters,
+                segment_text,
+                default_character,
+                previous_segment_text=previous_segment_text,
+                next_segment_text=next_segment_text,
+            )
+            if default_character not in default_related_characters:
+                default_related_characters.insert(0, default_character)
+
+            default_primary_index = next(
+                (idx for idx, item in enumerate(characters) if item is default_character),
+                0,
+            )
+            default_related_indexes = [
+                idx
+                for idx, item in enumerate(characters)
+                if any(item is selected for selected in default_related_characters)
+            ]
+
+            character = default_character
+            related_characters = list(default_related_characters)
             related_reference_paths = _collect_reference_paths(related_characters, limit=2)
 
             image_path = temp_root / f"segment_{index:04d}.png"
@@ -1605,6 +2039,11 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                     model_id=payload.model_id,
                     related_reference_image_paths=related_reference_paths,
                     story_world_context=story_world_context,
+                    previous_segment_text=previous_segment_text,
+                    next_segment_text=next_segment_text,
+                    character_candidates=characters,
+                    default_primary_index=default_primary_index,
+                    default_related_indexes=default_related_indexes,
                 )
             )
             audio_task = asyncio.create_task(
@@ -1619,6 +2058,38 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
             prompt_bundle = await prompt_task
             prompt = str(prompt_bundle.get("prompt") or "").strip()
             scene_metadata = prompt_bundle.get("metadata") or {}
+
+            assignment = prompt_bundle.get("character_assignment") if isinstance(prompt_bundle.get("character_assignment"), dict) else {}
+            resolved_primary_index = _coerce_character_index(assignment.get("primary_index"), len(characters))
+            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=3)
+
+            if resolved_primary_index is None:
+                resolved_primary_index = default_primary_index
+            if resolved_primary_index is not None and resolved_primary_index not in resolved_related_indexes:
+                resolved_related_indexes.insert(0, resolved_primary_index)
+            if not resolved_related_indexes:
+                resolved_related_indexes = list(default_related_indexes)
+
+            selected_character, selected_related = _pick_characters_by_indexes(
+                characters,
+                resolved_primary_index,
+                resolved_related_indexes,
+            )
+            if selected_character is not None:
+                character = selected_character
+                related_characters = selected_related or [selected_character]
+                if character not in related_characters:
+                    related_characters.insert(0, character)
+                related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+                logger.info(
+                    "Segment %s character assignment from prompt call: primary=%s confidence=%.2f reason=%s",
+                    index + 1,
+                    character.name,
+                    float(assignment.get("confidence") or 0.0),
+                    str(assignment.get("reason") or ""),
+                )
+
+            previous_primary_character = character
 
             image_task = asyncio.create_task(
                 _resolve_segment_image(
@@ -1641,6 +2112,8 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 "generated": "generated",
                 "fallback-llm": "fallback_llm",
                 "fallback-cache": "fallback_cache",
+                "fallback-character-cache": "fallback_character_cache",
+                "fallback-scene-only-cache": "fallback_scene_only_cache",
                 "fallback-reference": "fallback_reference",
                 "fallback-random-cache": "fallback_random_cache",
             }
@@ -1680,6 +2153,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 current_segment=index + 1,
                 total_segments=total,
                 clip_count=rendered_clip_count,
+                image_source_report=_build_image_source_report(image_source_counts),
             )
 
         if job_store.is_cancelled(job_id):

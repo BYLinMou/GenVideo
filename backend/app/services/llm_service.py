@@ -350,6 +350,42 @@ def _clean_text(value: str | None, limit: int) -> str:
     return re.sub(r"\s+", " ", (value or "")).strip()[:limit]
 
 
+def _normalize_index(value: object, size: int) -> int | None:
+    if size <= 0:
+        return None
+    try:
+        index = int(value)
+    except Exception:
+        return None
+    if 0 <= index < size:
+        return index
+    return None
+
+
+def _normalize_index_list(values: object, size: int, limit: int = 4) -> list[int]:
+    if size <= 0:
+        return []
+    raw_items: list[object]
+    if isinstance(values, list):
+        raw_items = values
+    elif values is None:
+        raw_items = []
+    else:
+        raw_items = [values]
+
+    output: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_items:
+        index = _normalize_index(raw, size)
+        if index is None or index in seen:
+            continue
+        seen.add(index)
+        output.append(index)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
+
+
 def _normalize_keyword_list(values: object, limit: int) -> list[str]:
     if isinstance(values, str):
         parts = re.split(r"[,，;；|/]", values)
@@ -384,6 +420,14 @@ def _normalize_scene_metadata(raw: dict | None) -> dict:
     mood = _clean_text(str(payload.get("mood", "")), 80)
     shot_type = _clean_text(str(payload.get("shot_type", "")), 80)
 
+    raw_scene_only = payload.get("is_scene_only", False)
+    if isinstance(raw_scene_only, bool):
+        is_scene_only = raw_scene_only
+    elif isinstance(raw_scene_only, (int, float)):
+        is_scene_only = bool(raw_scene_only)
+    else:
+        is_scene_only = str(raw_scene_only or "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
     return {
         "action_hint": action_hint,
         "location_hint": location_hint,
@@ -392,6 +436,7 @@ def _normalize_scene_metadata(raw: dict | None) -> dict:
         "location_keywords": location_keywords,
         "mood": mood,
         "shot_type": shot_type,
+        "is_scene_only": is_scene_only,
     }
 
 
@@ -434,6 +479,7 @@ def _fallback_scene_metadata(segment_text: str, image_prompt: str) -> dict:
             "location_keywords": [location_hint] if location_hint else [],
             "mood": "",
             "shot_type": "",
+            "is_scene_only": False,
         }
     )
 
@@ -461,9 +507,22 @@ def _fallback_segment_image_prompt(
     character: CharacterSuggestion,
     segment_text: str,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> str:
     guard = _character_identity_guard(character)
-    scene_text = _clean_text(segment_text, 1200)
+    current_segment = _clean_text(segment_text, 1200)
+    previous_segment = _clean_text(previous_segment_text, 420)
+    next_segment = _clean_text(next_segment_text, 420)
+    if previous_segment or next_segment:
+        context_parts: list[str] = [f"Current segment: {current_segment}"]
+        if previous_segment:
+            context_parts.append(f"Previous segment context: {previous_segment}")
+        if next_segment:
+            context_parts.append(f"Next segment context: {next_segment}")
+        scene_text = _clean_text("\n".join(context_parts), 1900)
+    else:
+        scene_text = current_segment
     return build_fallback_segment_image_prompt(
         guard=guard,
         scene_text=scene_text,
@@ -475,11 +534,27 @@ def _fallback_segment_image_bundle(
     character: CharacterSuggestion,
     segment_text: str,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+    default_primary_index: int | None = None,
+    default_related_indexes: list[int] | None = None,
 ) -> dict:
-    prompt = _fallback_segment_image_prompt(character, segment_text, story_world_context=story_world_context)
+    prompt = _fallback_segment_image_prompt(
+        character,
+        segment_text,
+        story_world_context=story_world_context,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
+    )
     return {
         "prompt": prompt,
         "metadata": _fallback_scene_metadata(segment_text, prompt),
+        "character_assignment": {
+            "primary_index": default_primary_index,
+            "related_indexes": [int(item) for item in (default_related_indexes or []) if isinstance(item, int)][:3],
+            "confidence": 0.0,
+            "reason": "fallback",
+        },
     }
 
 
@@ -522,11 +597,33 @@ async def build_segment_image_bundle(
     model_id: str | None,
     related_reference_image_paths: list[str] | None = None,
     story_world_context: str | None = None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
+    character_candidates: list[CharacterSuggestion] | None = None,
+    default_primary_index: int | None = None,
+    default_related_indexes: list[int] | None = None,
 ) -> dict:
+    candidates = list(character_candidates or [])
+    if not candidates:
+        candidates = [character]
+
+    safe_default_primary = _normalize_index(default_primary_index, len(candidates))
+    safe_default_related = _normalize_index_list(default_related_indexes, len(candidates), limit=3)
+    if safe_default_primary is None and safe_default_related:
+        safe_default_primary = safe_default_related[0]
+    if safe_default_primary is None:
+        safe_default_primary = 0 if candidates else None
+    if safe_default_primary is not None and safe_default_primary not in safe_default_related:
+        safe_default_related.insert(0, safe_default_primary)
+
     fallback_bundle = _fallback_segment_image_bundle(
         character,
         segment_text,
         story_world_context=story_world_context,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
+        default_primary_index=safe_default_primary,
+        default_related_indexes=safe_default_related,
     )
     guard = _character_identity_guard(character)
     scene_text = _clean_text(segment_text, 1200)
@@ -548,7 +645,31 @@ async def build_segment_image_bundle(
         },
         "story_world_context": world_context,
         "current_segment": _clean_text(segment_text, 1800),
+        "adjacent_context": {
+            "previous_segment": _clean_text(previous_segment_text, 500),
+            "next_segment": _clean_text(next_segment_text, 500),
+        },
+        "character_candidates": [
+            {
+                "index": index,
+                "name": _clean_text(item.name, 80),
+                "role": _clean_text(item.role, 80),
+                "importance": max(1, min(10, int(item.importance or 5))),
+                "is_main_character": bool(item.is_main_character),
+                "is_story_self": bool(item.is_story_self),
+                "has_reference_image": bool(item.reference_image_path),
+            }
+            for index, item in enumerate(candidates)
+        ],
+        "default_character_assignment": {
+            "primary_index": safe_default_primary,
+            "related_indexes": safe_default_related,
+        },
         "output_schema": {
+            "primary_index": 0,
+            "related_indexes": [0],
+            "character_confidence": 0.0,
+            "character_reason": "",
             "prompt": "",
             "action_hint": "",
             "location_hint": "",
@@ -557,6 +678,7 @@ async def build_segment_image_bundle(
             "location_keywords": [""],
             "mood": "",
             "shot_type": "",
+            "is_scene_only": False,
         },
     }
     payload = {
@@ -581,6 +703,18 @@ async def build_segment_image_bundle(
             parsed = _extract_json_object(content)
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
+                resolved_primary = _normalize_index((parsed or {}).get("primary_index"), len(candidates))
+                resolved_related = _normalize_index_list((parsed or {}).get("related_indexes"), len(candidates), limit=3)
+                if resolved_primary is None and resolved_related:
+                    resolved_primary = resolved_related[0]
+                if resolved_primary is None:
+                    resolved_primary = safe_default_primary
+                if resolved_primary is not None and resolved_primary not in resolved_related:
+                    resolved_related.insert(0, resolved_primary)
+
+                prompt_character = candidates[resolved_primary] if resolved_primary is not None and 0 <= resolved_primary < len(candidates) else character
+                guard = _character_identity_guard(prompt_character)
+
                 final_prompt = build_final_segment_image_prompt(
                     guard=guard,
                     scene_text=scene_text,
@@ -595,6 +729,12 @@ async def build_segment_image_bundle(
                 return {
                     "prompt": final_prompt,
                     "metadata": metadata,
+                    "character_assignment": {
+                        "primary_index": resolved_primary,
+                        "related_indexes": resolved_related,
+                        "confidence": max(0.0, min(1.0, float((parsed or {}).get("character_confidence", 0.0) or 0.0))),
+                        "reason": _clean_text(str((parsed or {}).get("character_reason", "")), 240),
+                    },
                 }
     except Exception:
         logger.exception("LLM image prompt/metadata build failed, using fallback bundle")
@@ -606,13 +746,22 @@ async def build_segment_image_prompt(
     character: CharacterSuggestion,
     segment_text: str,
     model_id: str | None,
+    previous_segment_text: str = "",
+    next_segment_text: str = "",
 ) -> str:
     bundle = await build_segment_image_bundle(
         character=character,
         segment_text=segment_text,
         model_id=model_id,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
     )
-    return _clean_text(str(bundle.get("prompt", "")), 2600) or _fallback_segment_image_prompt(character, segment_text)
+    return _clean_text(str(bundle.get("prompt", "")), 2600) or _fallback_segment_image_prompt(
+        character,
+        segment_text,
+        previous_segment_text=previous_segment_text,
+        next_segment_text=next_segment_text,
+    )
 
 
 def _fallback_character_analysis(text: str) -> list[CharacterSuggestion]:
@@ -834,6 +983,48 @@ def _normalize_voice_id(raw_voice: str | None, role: str, personality: str) -> s
     return VOICE_INFOS[0].id
 
 
+def _as_bool(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if not text:
+        return False
+    return text in {"1", "true", "yes", "y", "on", "是"}
+
+
+def _normalize_identity_flags(characters: list[CharacterSuggestion], source_text: str = "") -> list[CharacterSuggestion]:
+    if not characters:
+        return characters
+
+    main_indexes = [index for index, item in enumerate(characters) if bool(item.is_main_character)]
+    self_indexes = [index for index, item in enumerate(characters) if bool(item.is_story_self)]
+
+    if len(main_indexes) > 1:
+        keep = main_indexes[0]
+        for index in main_indexes[1:]:
+            characters[index].is_main_character = False
+        main_indexes = [keep]
+
+    if len(self_indexes) > 1:
+        keep = self_indexes[0]
+        for index in self_indexes[1:]:
+            characters[index].is_story_self = False
+        self_indexes = [keep]
+
+    if not main_indexes:
+        best_index = max(range(len(characters)), key=lambda idx: int(characters[idx].importance or 0))
+        characters[best_index].is_main_character = True
+        main_indexes = [best_index]
+
+    has_first_person = any(token in str(source_text or "") for token in ("我", "我们", "咱", "咱们", "I ", " I", "I'm", "I,"))
+    if has_first_person and not self_indexes:
+        characters[main_indexes[0]].is_story_self = True
+
+    return characters
+
+
 async def analyze_characters(text: str, depth: str, model_id: str | None) -> tuple[list[CharacterSuggestion], float, str]:
     selected_model = model_id or settings.llm_default_model
     if not settings.llm_api_key:
@@ -881,6 +1072,8 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
                         name=str(item.get("name", "character")),
                         role=role,
                         importance=max(1, min(10, int(item.get("importance", 5)))),
+                        is_main_character=_as_bool(item.get("is_main_character")),
+                        is_story_self=_as_bool(item.get("is_story_self")),
                         appearance=str(item.get("appearance", "")),
                         personality=personality,
                         voice_id=voice_id,
@@ -890,6 +1083,7 @@ async def analyze_characters(text: str, depth: str, model_id: str | None) -> tup
 
             if not characters:
                 raise LLMServiceError("LLM returned empty characters")
+            _normalize_identity_flags(characters, source_text=text)
             return characters, max(0.0, min(1.0, confidence)), selected_model
     except LLMServiceError:
         raise

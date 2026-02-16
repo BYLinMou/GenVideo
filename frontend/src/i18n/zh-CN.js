@@ -300,4 +300,9 @@ Object.assign(zhCN.hint, {
   jobCreatedAt: '创建时间：{time}'
 })
 
+Object.assign(zhCN.field, {
+  mainCharacter: '主角',
+  storySelf: '第一人称'
+})
+
 export default zhCN

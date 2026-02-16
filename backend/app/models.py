@@ -26,6 +26,8 @@ class CharacterSuggestion(BaseModel):
     name: str
     role: str = "supporting"
     importance: int = 5
+    is_main_character: bool = False
+    is_story_self: bool = False
     appearance: str = ""
     personality: str = ""
     voice_id: str = "zh-CN-YunxiNeural"
