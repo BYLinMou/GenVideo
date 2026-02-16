@@ -317,11 +317,17 @@ Object.assign(zhCN.placeholder, {
 })
 
 Object.assign(zhCN.action, {
+  manualFindNext: '查找下一个',
   manualReplaceAll: '全部替换'
+})
+
+Object.assign(zhCN.hint, {
+  manualFindSummary: '匹配 {current}/{total}'
 })
 
 Object.assign(zhCN.toast, {
   manualReplaceFindRequired: '请先输入要查找的文本',
+  manualFindNoMatch: '未找到匹配内容',
   manualReplaceNoMatch: '未找到匹配内容',
   manualReplaceApplied: '已替换 {count} 处内容'
 })

@@ -99,7 +99,7 @@ label {
 .manual-replace-toolbar {
   margin-top: 10px;
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(220px, 1fr) auto auto auto;
   gap: 8px;
   align-items: center;
 }
@@ -109,6 +109,10 @@ label {
   align-items: center;
   gap: 8px;
   color: #344054;
+  white-space: nowrap;
+}
+
+.manual-find-summary {
   white-space: nowrap;
 }
 

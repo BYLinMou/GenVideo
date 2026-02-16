@@ -234,6 +234,7 @@ const jobs = ref([])
 const activeJobId = ref('')
 const recoverJobIdInput = ref('')
 const novelAliasInputRef = ref(null)
+const sourceTextInputRef = ref(null)
 const clipVideoEnabled = reactive({})
 const finalVideoEnabled = reactive({})
 const JOB_LIST_PAGE_SIZE = 5
@@ -574,6 +575,13 @@ const manualReplace = reactive({
   caseSensitive: false
 })
 
+const manualFindState = reactive({
+  lookupKey: '',
+  cursor: 0,
+  current: 0,
+  total: 0
+})
+
 const replacementEnabledCount = computed(() => {
   return replacementEntries.value.filter((item) => item.enabled && item.replacement.trim()).length
 })
@@ -875,7 +883,76 @@ function applyManualReplaceAll() {
   }
 
   form.text = transformed
+  manualFindState.lookupKey = ''
+  manualFindState.cursor = 0
+  manualFindState.current = 0
+  manualFindState.total = 0
   ElMessage.success(t('toast.manualReplaceApplied', { count: replacedCount }))
+}
+
+function collectManualFindMatches(source, keyword, caseSensitive) {
+  const content = String(source || '')
+  const needle = String(keyword || '')
+  if (!content || !needle) return []
+
+  const target = caseSensitive ? content : content.toLocaleLowerCase()
+  const lookup = caseSensitive ? needle : needle.toLocaleLowerCase()
+  const indexes = []
+  let cursor = 0
+  const step = Math.max(1, lookup.length)
+
+  while (cursor < target.length) {
+    const index = target.indexOf(lookup, cursor)
+    if (index < 0) break
+    indexes.push(index)
+    cursor = index + step
+  }
+  return indexes
+}
+
+async function findNextInSourceText() {
+  const source = String(form.text || '')
+  if (!source.trim()) {
+    ElMessage.warning(t('toast.textRequired'))
+    return
+  }
+
+  const keyword = String(manualReplace.find || '')
+  if (!keyword.trim()) {
+    ElMessage.warning(t('toast.manualReplaceFindRequired'))
+    return
+  }
+
+  const lookupKey = `${manualReplace.caseSensitive ? '1' : '0'}:${keyword}`
+  if (manualFindState.lookupKey !== lookupKey) {
+    manualFindState.lookupKey = lookupKey
+    manualFindState.cursor = 0
+    manualFindState.current = 0
+    manualFindState.total = 0
+  }
+
+  const matches = collectManualFindMatches(source, keyword, manualReplace.caseSensitive)
+  if (!matches.length) {
+    manualFindState.current = 0
+    manualFindState.total = 0
+    ElMessage.info(t('toast.manualFindNoMatch'))
+    return
+  }
+
+  const nextIndex = matches.find((item) => item >= manualFindState.cursor)
+  const targetIndex = typeof nextIndex === 'number' ? nextIndex : matches[0]
+  const current = matches.indexOf(targetIndex) + 1
+  manualFindState.cursor = targetIndex + keyword.length
+  manualFindState.current = current
+  manualFindState.total = matches.length
+
+  await nextTick()
+  const textInput = sourceTextInputRef.value
+  const textarea = textInput?.textarea || textInput?.input || null
+  if (textarea?.focus && textarea?.setSelectionRange) {
+    textarea.focus()
+    textarea.setSelectionRange(targetIndex, targetIndex + keyword.length)
+  }
 }
 
 function resetJob() {
@@ -2167,6 +2244,10 @@ watch(
 watch(
   manualReplace,
   () => {
+    manualFindState.lookupKey = ''
+    manualFindState.cursor = 0
+    manualFindState.current = 0
+    manualFindState.total = 0
     schedulePersistWorkspaceDraft()
   },
   { deep: true }
@@ -2501,6 +2582,7 @@ onUnmounted(() => {
           v-model="manualReplace.find"
           :placeholder="t('placeholder.manualFind')"
           clearable
+          @keyup.enter="findNextInSourceText"
         />
         <el-input
           v-model="manualReplace.replace"
@@ -2511,10 +2593,14 @@ onUnmounted(() => {
           <el-switch v-model="manualReplace.caseSensitive" />
           <span>{{ t('field.manualReplaceCaseSensitive') }}</span>
         </div>
+        <el-button @click="findNextInSourceText">{{ t('action.manualFindNext') }}</el-button>
         <el-button type="primary" @click="applyManualReplaceAll">{{ t('action.manualReplaceAll') }}</el-button>
+        <span v-if="manualFindState.total > 0" class="muted manual-find-summary">
+          {{ t('hint.manualFindSummary', { current: manualFindState.current, total: manualFindState.total }) }}
+        </span>
       </div>
 
-      <el-input v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
+      <el-input ref="sourceTextInputRef" v-model="form.text" type="textarea" :rows="12" :placeholder="t('placeholder.textInput')" />
       <div class="actions">
         <el-button @click="removeChapterHeadings">{{ t('action.filterChapterHeadings') }}</el-button>
         <el-button :loading="loading.segment" @click="runSegmentPreview">{{ t('action.segmentPreview') }}</el-button>
