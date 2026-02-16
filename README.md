@@ -109,7 +109,7 @@ Default: `http://localhost:8000`
 - `GET /api/final-videos?limit=200` (list final videos sorted by creation time desc)
 - `GET /api/final-videos/{filename}/thumb` (on-demand cached final-video thumbnail)
 - `GET /api/final-videos/{filename}/download`
-- `DELETE /api/workspace/final-videos/{filename}` (workspace-protected delete; removes final video + final-video thumb + `outputs/temp/{job_id}` + related job DB records if stem matches)
+- `DELETE /api/workspace/final-videos/{filename}` (workspace-protected delete; removes final video + final-video thumb; if stem matches an existing job id, job is rolled back to pre-compose state)
 
 Character identity fields (`CharacterSuggestion`):
 

@@ -2202,20 +2202,22 @@ async function deleteFinalVideo(item) {
   }
 
   try {
-    await api.deleteFinalVideo(filename)
+    const result = await api.deleteFinalVideo(filename)
     finalVideos.value = finalVideos.value.filter((video) => String(video.filename || '') !== filename)
     resetFinalVideoEnabled()
 
-    const matched = filename.match(/^(.*)\.mp4$/i)
-    const jobId = matched ? String(matched[1] || '').trim() : ''
-    if (jobId) {
-      removeJobRecord(jobId)
-      persistJobSnapshot()
-      if (!jobs.value.length) {
-        stopPolling()
-      }
+    const rolledBackStatus = result?.rolled_back_status && typeof result.rolled_back_status === 'object'
+      ? result.rolled_back_status
+      : null
+    const jobId = String(result?.job_id || '').trim()
+    if (jobId && rolledBackStatus) {
+      syncActiveJobRecordFromApiStatus(jobId, rolledBackStatus)
+      startPolling()
+    } else if (jobId) {
+      await forceRefreshJobStatus(jobId, { silent: true })
     }
 
+    persistJobSnapshot()
     ElMessage.success(t('toast.finalVideoDeleteSuccess', { filename }))
   } catch (error) {
     ElMessage.error(t('toast.finalVideoDeleteFailed', { error: error.message }))
