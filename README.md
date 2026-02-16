@@ -30,6 +30,9 @@ Novel-to-video generation system (FastAPI + Vue 3), updated for the current work
 - One segment generates one clip.
 - One segment triggers one image prompt call (with reference images if available).
 - Scene-image cache matching is text-only (character/action/scene descriptors).
+- Character config supports identity flags: `is_main_character` and `is_story_self` (frontend label: `第一人称`).
+- Identity flags are uniqueness-constrained: at most one `is_main_character=true`, at most one `is_story_self=true`.
+- Segment image generation uses single-call LLM output for both prompt metadata and character assignment (`primary_index` / `related_indexes`).
 - `segment_groups_range` supports 1-based ranges, e.g. `1-80,81-90`.
 - A single value like `60` means `1-60`.
 - A single non-positive value like `0` or `-1` means all segments.
@@ -105,6 +108,12 @@ Default: `http://localhost:8000`
 - `GET /api/final-videos?limit=200` (list final videos sorted by creation time desc)
 - `GET /api/final-videos/{filename}/thumb` (on-demand cached final-video thumbnail)
 - `GET /api/final-videos/{filename}/download`
+
+Character identity fields (`CharacterSuggestion`):
+
+- `is_main_character` (bool): marks one main character
+- `is_story_self` (bool): marks the first-person narrator role (if the novel perspective is first-person)
+- These fields are accepted in `POST /api/confirm-characters` and in `POST /api/generate-video` within `characters[]`
 
 ## Frontend
 

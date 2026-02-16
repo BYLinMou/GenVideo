@@ -706,7 +706,7 @@ def _coerce_character_indexes(values: object, size: int, limit: int = 4) -> list
     return output
 
 
-def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 2) -> list[str]:
+def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int = 3) -> list[str]:
     output: list[str] = []
     seen: set[str] = set()
     for item in characters:
@@ -715,6 +715,34 @@ def _collect_reference_paths(characters: list[CharacterSuggestion], limit: int =
             continue
         key = raw.replace("\\", "/").lower()
         if key in seen:
+            continue
+        path = Path(raw)
+        if not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
+            continue
+        seen.add(key)
+        output.append(raw)
+        if len(output) >= max(1, int(limit)):
+            break
+    return output
+
+
+def _collect_related_reference_paths(
+    primary: CharacterSuggestion | None,
+    characters: list[CharacterSuggestion],
+    limit: int = 3,
+) -> list[str]:
+    primary_key = _normalize_path_key((primary.reference_image_path if primary else "") or "")
+    output: list[str] = []
+    seen: set[str] = set()
+
+    for item in characters:
+        raw = (item.reference_image_path or "").strip()
+        if not raw:
+            continue
+        key = _normalize_path_key(raw)
+        if not key or key in seen:
+            continue
+        if primary_key and key == primary_key:
             continue
         path = Path(raw)
         if not path.exists() or path.suffix.lower() not in {".png", ".jpg", ".jpeg", ".webp"}:
@@ -2008,7 +2036,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
             character = default_character
             related_characters = list(default_related_characters)
-            related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+            related_reference_paths = _collect_related_reference_paths(character, related_characters, limit=3)
 
             image_path = temp_root / f"segment_{index:04d}.png"
             audio_path = temp_root / f"segment_{index:04d}.mp3"
@@ -2061,7 +2089,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
 
             assignment = prompt_bundle.get("character_assignment") if isinstance(prompt_bundle.get("character_assignment"), dict) else {}
             resolved_primary_index = _coerce_character_index(assignment.get("primary_index"), len(characters))
-            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=3)
+            resolved_related_indexes = _coerce_character_indexes(assignment.get("related_indexes"), len(characters), limit=4)
 
             if resolved_primary_index is None:
                 resolved_primary_index = default_primary_index
@@ -2080,7 +2108,7 @@ async def run_video_job(job_id: str, payload: GenerateVideoRequest, base_url: st
                 related_characters = selected_related or [selected_character]
                 if character not in related_characters:
                     related_characters.insert(0, character)
-                related_reference_paths = _collect_reference_paths(related_characters, limit=2)
+                related_reference_paths = _collect_related_reference_paths(character, related_characters, limit=3)
                 logger.info(
                     "Segment %s character assignment from prompt call: primary=%s confidence=%.2f reason=%s",
                     index + 1,

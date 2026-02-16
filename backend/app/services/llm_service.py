@@ -551,7 +551,7 @@ def _fallback_segment_image_bundle(
         "metadata": _fallback_scene_metadata(segment_text, prompt),
         "character_assignment": {
             "primary_index": default_primary_index,
-            "related_indexes": [int(item) for item in (default_related_indexes or []) if isinstance(item, int)][:3],
+            "related_indexes": [int(item) for item in (default_related_indexes or []) if isinstance(item, int)][:4],
             "confidence": 0.0,
             "reason": "fallback",
         },
@@ -608,7 +608,7 @@ async def build_segment_image_bundle(
         candidates = [character]
 
     safe_default_primary = _normalize_index(default_primary_index, len(candidates))
-    safe_default_related = _normalize_index_list(default_related_indexes, len(candidates), limit=3)
+    safe_default_related = _normalize_index_list(default_related_indexes, len(candidates), limit=4)
     if safe_default_primary is None and safe_default_related:
         safe_default_primary = safe_default_related[0]
     if safe_default_primary is None:
@@ -641,7 +641,7 @@ async def build_segment_image_bundle(
             "personality": _clean_text(character.personality, 400),
             "base_prompt": _clean_text(character.base_prompt, 800),
             "has_reference_image": bool(character.reference_image_path),
-            "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:2],
+            "related_reference_image_paths": [str(item) for item in (related_reference_image_paths or []) if str(item).strip()][:3],
         },
         "story_world_context": world_context,
         "current_segment": _clean_text(segment_text, 1800),
@@ -667,7 +667,7 @@ async def build_segment_image_bundle(
         },
         "output_schema": {
             "primary_index": 0,
-            "related_indexes": [0],
+            "related_indexes": [0, 1, 2, 3],
             "character_confidence": 0.0,
             "character_reason": "",
             "prompt": "",
@@ -704,7 +704,7 @@ async def build_segment_image_bundle(
             candidate = _clean_text(str((parsed or {}).get("prompt", "")), 2200)
             if candidate:
                 resolved_primary = _normalize_index((parsed or {}).get("primary_index"), len(candidates))
-                resolved_related = _normalize_index_list((parsed or {}).get("related_indexes"), len(candidates), limit=3)
+                resolved_related = _normalize_index_list((parsed or {}).get("related_indexes"), len(candidates), limit=4)
                 if resolved_primary is None and resolved_related:
                     resolved_primary = resolved_related[0]
                 if resolved_primary is None:
